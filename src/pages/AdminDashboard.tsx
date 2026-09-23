@@ -1441,7 +1441,41 @@ export default function AdminDashboard() {
 
             {/* Sending Actions */}
             <div className="pt-6 mt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              {/* Option 1: Direct 1-Click via Gmail App / Web (Works 100% on Netlify and Mobile) */}
+              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-200 dark:border-emerald-800/60 p-4 rounded-2xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-1">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                      1-Click Send via Gmail (Guaranteed & Fast)
+                    </h4>
+                    <p className="text-xs text-emerald-700/80 dark:text-emerald-400 mt-0.5">
+                      Agar direct server send me 'fetch fail' aaye, toh aap yahan se 1 tap me Gmail app open kar sakte hain (saare emails BCC me automatically lag jayenge).
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyAllEmails}
+                      className="px-3 py-2 bg-white dark:bg-slate-900 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy All Emails (BCC)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenInGmail}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-colors"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      Open in Gmail App 🚀
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Option 2: Automated Server Broadcast / Test */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
                 <button
                   type="button"
                   onClick={handleTestEmail}
@@ -1481,15 +1515,7 @@ export default function AdminDashboard() {
               </div>
 
               <div className="flex items-center justify-between text-xs text-slate-400 dark:text-slate-500 px-1 pt-1">
-                <span>⚡ Direct automated server delivery (no Gmail app required)</span>
-                <button
-                  type="button"
-                  onClick={handleCopyAllEmails}
-                  className="text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 font-medium flex items-center gap-1 transition-colors"
-                >
-                  <Copy className="w-3 h-3" />
-                  <span>Copy Emails</span>
-                </button>
+                <span>⚡ Agar server connection fail ho, toh upar 'Open in Gmail App' use karein.</span>
               </div>
             </div>
           </div>

@@ -140,13 +140,6 @@ export default function Community() {
               )}
             </button>
             <InstallAppButton />
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#5E51D9] hover:bg-[#4e42c2] text-white text-xs font-bold rounded-xl shadow-xs transition-all active:scale-95 my-2"
-            >
-              <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
-              <span>+ Ask Doubt</span>
-            </button>
           </div>
 
         </div>
