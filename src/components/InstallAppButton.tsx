@@ -44,7 +44,7 @@ export default function InstallAppButton() {
         )}
       >
         <Download size={12} />
-        <span>Download Karwa Version</span>
+        <span>Download Latest Version</span>
       </button>
 
       <a

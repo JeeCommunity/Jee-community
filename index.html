@@ -90,6 +90,74 @@
       }
     </script>
     
+    <!-- Block Netlify floating badge / HUD completely -->
+    <style>
+      #nl-badge-frame,
+      #nl-hud-frame,
+      iframe[id^="nl-"],
+      iframe[title*="Netlify" i],
+      iframe[src*="netlify" i],
+      div[id*="netlify"],
+      div[id*="nl-hud"] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        width: 0 !important;
+        height: 0 !important;
+        max-width: 0 !important;
+        max-height: 0 !important;
+        clip: rect(0, 0, 0, 0) !important;
+        position: absolute !important;
+        bottom: -99999px !important;
+        right: -99999px !important;
+        z-index: -9999999 !important;
+        transform: scale(0) !important;
+      }
+    </style>
+    <script>
+      (function() {
+        try {
+          localStorage.setItem("nl-hud:public:v1", JSON.stringify({ dismissed: true, at: Date.now() }));
+          localStorage.setItem("nl-hud:owner-private:v1", JSON.stringify({ dismissed: true, at: Date.now() }));
+          sessionStorage.setItem("nl-hud:public:v1", JSON.stringify({ dismissed: true, at: Date.now() }));
+          sessionStorage.setItem("nl-hud:owner-private:v1", JSON.stringify({ dismissed: true, at: Date.now() }));
+        } catch (e) {}
+
+        var killFrames = function() {
+          var frames = document.querySelectorAll('#nl-badge-frame, #nl-hud-frame, iframe[title*="Netlify" i], iframe[id^="nl-"]');
+          for (var i = 0; i < frames.length; i++) {
+            try { frames[i].remove(); } catch (e) { frames[i].style.display = 'none'; }
+          }
+        };
+
+        if (typeof MutationObserver !== 'undefined') {
+          var obs = new MutationObserver(function(mutations) {
+            for (var m = 0; m < mutations.length; m++) {
+              var added = mutations[m].addedNodes;
+              for (var j = 0; j < added.length; j++) {
+                var node = added[j];
+                if (node.nodeType === 1) {
+                  if (
+                    node.id === 'nl-badge-frame' ||
+                    node.id === 'nl-hud-frame' ||
+                    (node.tagName === 'IFRAME' && (node.title || '').toLowerCase().indexOf('netlify') !== -1) ||
+                    (node.tagName === 'SCRIPT' && (node.src || '').indexOf('/.netlify/scripts/hud') !== -1)
+                  ) {
+                    try { node.remove(); } catch (e) { node.style.display = 'none'; }
+                  }
+                }
+              }
+            }
+          });
+          obs.observe(document.documentElement, { childList: true, subtree: true });
+        }
+
+        window.addEventListener('DOMContentLoaded', killFrames);
+        window.addEventListener('load', killFrames);
+        setInterval(killFrames, 1000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

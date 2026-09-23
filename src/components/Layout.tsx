@@ -417,7 +417,7 @@ export default function Layout() {
                       className="w-full text-left px-4 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center font-medium"
                     >
                       <Download className="w-4 h-4 mr-2" />
-                      Download Karwa Version
+                      Download Latest Version
                     </button>
                     <a 
                       href="https://jee-community.netlify.app"
@@ -429,10 +429,11 @@ export default function Layout() {
                       <ExternalLink className="w-4 h-4 mr-2" />
                       Use Latest Version App
                     </a>
-                                        <Link to="/my-notes" className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center" onClick={() => setIsDropdownOpen(false)}>
+                    <Link to="/my-notes" className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center" onClick={() => setIsDropdownOpen(false)}>
                       <StickyNote className="w-4 h-4 mr-2" />
                       My Notes
-                    </Link>\n                    <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center">
+                    </Link>
+                    <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center">
                       <LogOut className="w-4 h-4 mr-2" />
                       Logout
                     </button>
@@ -468,7 +469,7 @@ export default function Layout() {
                     className="w-full text-left px-4 py-2.5 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center font-medium"
                   >
                     <Download className="w-4 h-4 mr-2" />
-                    Download Karwa Version
+                    Download Latest Version
                   </button>
                   <a 
                     href="https://jee-community.netlify.app" 
@@ -647,7 +648,7 @@ export default function Layout() {
                   }
                 }} className="w-full flex items-center space-x-3 px-3 py-3 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg font-medium transition-colors text-left">
                   <Download className="w-5 h-5" />
-                  <span>Download Karwa Version</span>
+                  <span>Download Latest Version</span>
                 </button>
                 <a href="https://jee-community.netlify.app" target="_blank" rel="noopener noreferrer" onClick={() => setIsMobileMenuOpen(false)} className="w-full flex items-center space-x-3 px-3 py-3 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg font-medium transition-colors text-left">
                   <ExternalLink className="w-5 h-5" />

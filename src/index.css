@@ -21,3 +21,28 @@
   75% { opacity: 1; }
   100% { transform: translate(120px, -300px) scale(1); opacity: 0; }
 }
+
+/* Netlify HUD / Floating Badge Suppression */
+#nl-badge-frame,
+#nl-hud-frame,
+iframe[id^="nl-"],
+iframe[title*="Netlify" i],
+iframe[src*="netlify" i],
+div[id*="netlify"],
+div[id*="nl-hud"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  max-width: 0 !important;
+  max-height: 0 !important;
+  clip: rect(0, 0, 0, 0) !important;
+  position: absolute !important;
+  bottom: -99999px !important;
+  right: -99999px !important;
+  z-index: -9999999 !important;
+  transform: scale(0) !important;
+}
+
