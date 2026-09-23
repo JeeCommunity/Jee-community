@@ -1,0 +1,6 @@
+{
+  "name": "JEE Community",
+  "description": "Free AI-powered JEE Doubt Solver and Student Community.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

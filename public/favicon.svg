@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Left Page -->
+  <path d="M 128 224 C 96 224, 48 200, 32 176 L 32 80 C 48 104, 96 128, 128 128 Z" fill="#1e40af" />
+  <!-- Right Page -->
+  <path d="M 128 224 C 160 224, 208 200, 224 176 L 224 80 C 208 104, 160 128, 128 128 Z" fill="#3b82f6" />
+  <!-- Big Star -->
+  <path d="M 128 16 Q 128 64 176 64 Q 128 64 128 112 Q 128 64 80 64 Q 128 64 128 16 Z" fill="#2563eb" />
+  <!-- Small Star -->
+  <path d="M 184 20 Q 184 40 204 40 Q 184 40 184 60 Q 184 40 164 40 Q 184 40 184 20 Z" fill="#60a5fa" />
+</svg>

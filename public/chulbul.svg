@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <circle cx="50" cy="50" r="50" fill="#facc15" />
+  <!-- Hat -->
+  <path d="M 20 40 Q 50 20 80 40" fill="#1e3a8a" />
+  <path d="M 15 45 L 85 45" stroke="#1e3a8a" stroke-width="4" stroke-linecap="round" />
+  <!-- Badge -->
+  <circle cx="50" cy="30" r="5" fill="#eab308" />
+  <!-- Sunglasses -->
+  <rect x="25" y="50" width="20" height="15" rx="5" fill="#111827" />
+  <rect x="55" y="50" width="20" height="15" rx="5" fill="#111827" />
+  <path d="M 45 55 L 55 55" stroke="#111827" stroke-width="3" />
+  <!-- Mustache -->
+  <path d="M 35 75 Q 50 65 65 75 Q 50 72 35 75" fill="#451a03" stroke="#451a03" stroke-width="4" stroke-linecap="round" />
+</svg>
