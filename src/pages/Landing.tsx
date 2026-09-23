@@ -12,9 +12,14 @@ export default function Landing() {
     <div className="flex flex-col min-h-[calc(100vh-4rem)] bg-slate-50 dark:bg-slate-800 overflow-hidden relative">
       {/* Hero Section */}
       <section className="flex-1 flex flex-col items-center justify-center text-center py-20 px-4 relative z-10">
-        <div className="inline-flex items-center space-x-2 bg-blue-100/50 text-blue-700 px-4 py-2 rounded-full text-sm font-semibold mb-8 border border-blue-200">
-          <Zap className="w-4 h-4 text-blue-600" />
-          <span>The Ultimate Hub for JEE Aspirants</span>
+        <div className="flex flex-col items-center gap-2 mb-8">
+          <div className="inline-flex items-center space-x-2 bg-blue-100/60 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 px-4 py-2 rounded-full text-sm font-semibold border border-blue-200 dark:border-blue-800">
+            <Zap className="w-4 h-4 text-blue-600" />
+            <span>You're using the latest version of JEE Community.</span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+            JEE Community has moved to its latest web platform.
+          </p>
         </div>
         
         <h1 className="text-4xl md:text-6xl lg:text-7xl font-black text-slate-900 dark:text-white tracking-tight mb-6 max-w-4xl leading-[1.1]">
