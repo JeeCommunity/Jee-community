@@ -752,89 +752,106 @@ app.post('/api/admin/send-reminders', async (req, res) => {
       return res.status(500).json({ error: "Server email credentials are not configured." });
     }
 
-    const targetUrl = actionUrl || "https://jee-community.netlify.app";
-    const targetText = actionText || "Open JEE Community App 🚀";
+    // Respond immediately to prevent any client timeout / fetch fail
+    res.json({ success: true, message: `Email broadcast started for ${emails.length} users!` });
 
-    const cleanedPassword = (process.env.GMAIL_APP_PASSWORD || "").replace(/[\s\u00A0-]/g, "");
+    // Process in background non-blocking
+    setImmediate(async () => {
+      try {
+        const targetUrl = actionUrl || "https://jee-community.netlify.app";
+        const targetText = actionText || "Open JEE Community App 🚀";
 
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: (process.env.GMAIL_USER || "").trim(),
-        pass: cleanedPassword,
+        const cleanedPassword = (process.env.GMAIL_APP_PASSWORD || "").replace(/[\s\u00A0-]/g, "");
+
+        const transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            user: (process.env.GMAIL_USER || "").trim(),
+            pass: cleanedPassword,
+          }
+        });
+
+        const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          </head>
+          <body style="margin: 0; padding: 20px 10px; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
+              
+              <!-- Header Banner -->
+              <div style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); padding: 32px 24px; text-align: center;">
+                <div style="display: inline-block; background: rgba(255, 255, 255, 0.2); padding: 6px 14px; border-radius: 9999px; margin-bottom: 12px;">
+                  <span style="color: #ffffff; font-size: 13px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase;">🎓 IIT-JEE Aspirants Community</span>
+                </div>
+                <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">JEE Community</h1>
+                <p style="color: #e0e7ff; margin: 6px 0 0; font-size: 14px;">Free Doubt Solving • Notes Hub • Live Study Groups</p>
+              </div>
+
+              <!-- Body Content -->
+              <div style="padding: 32px 28px; color: #1e293b; line-height: 1.7; font-size: 15px;">
+                <div style="white-space: pre-wrap; word-break: break-word;">${message.replace(/\n/g, '<br>')}</div>
+
+                <!-- Action Button -->
+                <div style="text-align: center; margin: 36px 0 20px;">
+                  <a href="${targetUrl}" target="_blank" style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); color: #ffffff; padding: 15px 36px; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 16px; display: inline-block; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35); text-transform: uppercase; letter-spacing: 0.5px;">
+                    ${targetText}
+                  </a>
+                </div>
+
+                <div style="text-align: center; margin-top: 10px;">
+                  <a href="${targetUrl}" style="color: #64748b; font-size: 13px; text-decoration: underline;">${targetUrl}</a>
+                </div>
+              </div>
+
+              <!-- Footer -->
+              <div style="background-color: #f8fafc; padding: 20px 24px; text-align: center; color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0;">
+                <p style="margin: 0 0 6px 0;">You received this update because you are a verified member of the JEE Community platform.</p>
+                <p style="margin: 0;">© ${new Date().getFullYear()} JEE Community. All rights reserved.</p>
+              </div>
+
+            </div>
+          </body>
+          </html>
+        `;
+
+        const batchSize = 50;
+        let sentCount = 0;
+
+        for (let i = 0; i < emails.length; i += batchSize) {
+          const batch = emails.slice(i, i + batchSize);
+          if (batch.length === 0) continue;
+
+          try {
+            const mailOptions = {
+              from: '"JEE Community" <' + process.env.GMAIL_USER + '>',
+              to: process.env.GMAIL_USER,
+              bcc: batch,
+              subject: subject,
+              html: htmlContent
+            };
+
+            const info = await transporter.sendMail(mailOptions);
+            sentCount += batch.length;
+            console.log(`Background Batch ${i / batchSize + 1} sent to ${batch.length} users:`, info.response);
+          } catch (batchErr) {
+            console.error(`Error sending batch ${i / batchSize + 1}:`, batchErr);
+          }
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        console.log(`Broadcast completed successfully to ${sentCount} users.`);
+      } catch (bgErr) {
+        console.error("Background email dispatch error:", bgErr);
       }
     });
 
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      </head>
-      <body style="margin: 0; padding: 20px 10px; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
-          
-          <!-- Header Banner -->
-          <div style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); padding: 32px 24px; text-align: center;">
-            <div style="display: inline-block; background: rgba(255, 255, 255, 0.2); padding: 6px 14px; border-radius: 9999px; margin-bottom: 12px;">
-              <span style="color: #ffffff; font-size: 13px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase;">🎓 IIT-JEE Aspirants Community</span>
-            </div>
-            <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">JEE Community</h1>
-            <p style="color: #e0e7ff; margin: 6px 0 0; font-size: 14px;">Free Doubt Solving • Notes Hub • Live Study Groups</p>
-          </div>
-
-          <!-- Body Content -->
-          <div style="padding: 32px 28px; color: #1e293b; line-height: 1.7; font-size: 15px;">
-            <div style="white-space: pre-wrap; word-break: break-word;">${message.replace(/\n/g, '<br>')}</div>
-
-            <!-- Action Button -->
-            <div style="text-align: center; margin: 36px 0 20px;">
-              <a href="${targetUrl}" target="_blank" style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); color: #ffffff; padding: 15px 36px; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 16px; display: inline-block; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35); text-transform: uppercase; letter-spacing: 0.5px;">
-                ${targetText}
-              </a>
-            </div>
-
-            <div style="text-align: center; margin-top: 10px;">
-              <a href="${targetUrl}" style="color: #64748b; font-size: 13px; text-decoration: underline;">${targetUrl}</a>
-            </div>
-          </div>
-
-          <!-- Footer -->
-          <div style="background-color: #f8fafc; padding: 20px 24px; text-align: center; color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0;">
-            <p style="margin: 0 0 6px 0;">You received this update because you are a verified member of the JEE Community platform.</p>
-            <p style="margin: 0;">© ${new Date().getFullYear()} JEE Community. All rights reserved.</p>
-          </div>
-
-        </div>
-      </body>
-      </html>
-    `;
-
-    const batchSize = 50;
-    let sentCount = 0;
-
-    for (let i = 0; i < emails.length; i += batchSize) {
-      const batch = emails.slice(i, i + batchSize);
-      if (batch.length === 0) continue;
-
-      const mailOptions = {
-        from: '"JEE Community" <' + process.env.GMAIL_USER + '>',
-        to: process.env.GMAIL_USER,
-        bcc: batch,
-        subject: subject,
-        html: htmlContent
-      };
-
-      const info = await transporter.sendMail(mailOptions);
-      sentCount += batch.length;
-      console.log(`Batch ${i / batchSize + 1} sent to ${batch.length} users:`, info.response);
-    }
-    
-    res.json({ success: true, message: `Emails sent successfully to ${sentCount} users!` });
   } catch (error: any) {
-    console.error("Error sending emails:", error);
-    res.status(500).json({ error: "Failed to send emails: " + error.message });
+    console.error("Error initiating emails:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed to send emails: " + error.message });
+    }
   }
 });
 

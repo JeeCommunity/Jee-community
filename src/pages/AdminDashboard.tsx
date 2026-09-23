@@ -272,6 +272,7 @@ export default function AdminDashboard() {
   };
 
   const CLOUD_RUN_SERVER_URL = "https://ais-pre-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app";
+  const DEV_SERVER_URL = "https://ais-dev-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app";
 
   const sendBroadcastToServer = async (payload: {
     subject: string;
@@ -280,10 +281,13 @@ export default function AdminDashboard() {
     actionUrl: string;
     actionText: string;
   }) => {
-    const isNetlify = typeof window !== 'undefined' && window.location.hostname.includes('netlify.app');
-    const urlsToTry = isNetlify
-      ? [`${CLOUD_RUN_SERVER_URL}/api/admin/send-reminders`, '/api/admin/send-reminders']
-      : ['/api/admin/send-reminders', `${CLOUD_RUN_SERVER_URL}/api/admin/send-reminders`];
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const urlsToTry = [
+      `${origin}/api/admin/send-reminders`,
+      '/api/admin/send-reminders',
+      `${CLOUD_RUN_SERVER_URL}/api/admin/send-reminders`,
+      `${DEV_SERVER_URL}/api/admin/send-reminders`
+    ];
 
     let lastErrorMsg = '';
 
@@ -315,7 +319,7 @@ export default function AdminDashboard() {
         }
       } catch (err: any) {
         lastErrorMsg = err?.message || 'Server error';
-        if (lastErrorMsg.includes('credentials') || lastErrorMsg.includes('Invalid') || lastErrorMsg.includes('Failed to send')) {
+        if (lastErrorMsg.includes('credentials') || lastErrorMsg.includes('Invalid')) {
           throw new Error(lastErrorMsg);
         }
       }
