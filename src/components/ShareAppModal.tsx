@@ -5,7 +5,7 @@ import { cn } from '../lib/utils';
 
 export default function ShareAppModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
   const [copied, setCopied] = useState(false);
-  const shareUrl = "https://jee-11-community.ai.studio"; // Hardcoded share URL requested by user
+  const shareUrl = "https://jee-community.netlify.app"; // Updated to production Netlify URL
 
   if (!isOpen) return null;
 

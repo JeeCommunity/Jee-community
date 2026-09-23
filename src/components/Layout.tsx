@@ -5,7 +5,7 @@ import { auth, db } from '../firebase';
 import { doc, collection, query, where, getDoc, getCountFromServer, getDocs, onSnapshot, limit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useState, useRef, useEffect  , useMemo } from 'react';
-import { Trophy, MonitorPlay, StickyNote, FileText, Building2, MessageSquareQuote, Share2, Download } from 'lucide-react';
+import { Trophy, MonitorPlay, StickyNote, FileText, Building2, MessageSquareQuote, Share2, Download, ExternalLink } from 'lucide-react';
 import { usePWA } from '../hooks/usePWA';
 import FeedbackModal from './FeedbackModal';
 import WhatsNewModal from './WhatsNewModal';
@@ -404,15 +404,31 @@ export default function Layout() {
                       <Share2 className="w-4 h-4 mr-2" />
                       Share App
                     </button>
-                    {isInstallable && (
-                      <button 
-                        onClick={async () => { setIsDropdownOpen(false); const outcome = await installPWA(); if (outcome === 'accepted') window.alert("Installation started! The app 'JEE Community' will be added to your home screen or app drawer shortly."); }}
-                        className="w-full text-left px-4 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center"
-                      >
-                        <Download className="w-4 h-4 mr-2" />
-                        Install App
-                      </button>
-                    )}
+                    <button 
+                      onClick={async () => { 
+                        setIsDropdownOpen(false); 
+                        const outcome = await installPWA(); 
+                        if (outcome === 'accepted') {
+                          window.alert("Installation started! The app 'JEE Community' will be added to your home screen or app drawer shortly.");
+                        } else {
+                          window.alert("To install the app, tap your browser's menu (⋮) and choose 'Install app' or 'Add to Home Screen'.");
+                        }
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center font-medium"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Download Karwa Version
+                    </button>
+                    <a 
+                      href="https://jee-community.netlify.app"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setIsDropdownOpen(false)}
+                      className="w-full text-left px-4 py-2 text-sm text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 flex items-center font-medium"
+                    >
+                      <ExternalLink className="w-4 h-4 mr-2" />
+                      Use Latest Version App
+                    </a>
                                         <Link to="/my-notes" className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center" onClick={() => setIsDropdownOpen(false)}>
                       <StickyNote className="w-4 h-4 mr-2" />
                       My Notes
@@ -438,7 +454,33 @@ export default function Layout() {
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
               </button>
               {isDropdownOpen && (
-                <div className="absolute top-12 right-0 mt-2 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-lg py-1 border border-slate-200 dark:border-slate-700 transition-all z-50">
+                <div className="absolute top-12 right-0 mt-2 w-52 bg-white dark:bg-slate-900 rounded-xl shadow-lg py-1 border border-slate-200 dark:border-slate-700 transition-all z-50">
+                  <button 
+                    onClick={async () => { 
+                      setIsDropdownOpen(false); 
+                      const outcome = await installPWA(); 
+                      if (outcome === 'accepted') {
+                        window.alert("Installation started! The app 'JEE Community' will be added to your home screen or app drawer shortly.");
+                      } else {
+                        window.alert("To install the app, tap your browser's menu (⋮) and choose 'Install app' or 'Add to Home Screen'.");
+                      }
+                    }} 
+                    className="w-full text-left px-4 py-2.5 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center font-medium"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Download Karwa Version
+                  </button>
+                  <a 
+                    href="https://jee-community.netlify.app" 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    onClick={() => setIsDropdownOpen(false)} 
+                    className="w-full text-left px-4 py-2.5 text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 flex items-center"
+                  >
+                    <ExternalLink className="w-4 h-4 mr-2" />
+                    Use Latest Version App
+                  </a>
+                  <div className="my-1 border-t border-slate-100 dark:border-slate-800"></div>
                   <Link to="/about" onClick={() => setIsDropdownOpen(false)} className="w-full text-left px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center">About Us</Link>
                   <Link to="/privacy" onClick={() => setIsDropdownOpen(false)} className="w-full text-left px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center">Privacy Policy</Link>
                   <Link to="/terms" onClick={() => setIsDropdownOpen(false)} className="w-full text-left px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center">Terms of Service</Link>
@@ -595,12 +637,22 @@ export default function Layout() {
                   <Share2 className="w-5 h-5" />
                   <span>Share App</span>
                 </button>
-                {isInstallable && (
-                  <button onClick={async () => { setIsMobileMenuOpen(false); const outcome = await installPWA(); if (outcome === 'accepted') window.alert("Installation started! The app 'JEE Community' will be added to your home screen or app drawer shortly."); }} className="w-full flex items-center space-x-3 px-3 py-3 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg font-medium transition-colors text-left">
-                    <Download className="w-5 h-5" />
-                    <span>Install App</span>
-                  </button>
-                )}
+                <button onClick={async () => { 
+                  setIsMobileMenuOpen(false); 
+                  const outcome = await installPWA(); 
+                  if (outcome === 'accepted') {
+                    window.alert("Installation started! The app 'JEE Community' will be added to your home screen or app drawer shortly."); 
+                  } else {
+                    window.alert("To install the app, tap your browser menu (⋮) and choose 'Install app' or 'Add to Home Screen'.");
+                  }
+                }} className="w-full flex items-center space-x-3 px-3 py-3 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg font-medium transition-colors text-left">
+                  <Download className="w-5 h-5" />
+                  <span>Download Karwa Version</span>
+                </button>
+                <a href="https://jee-community.netlify.app" target="_blank" rel="noopener noreferrer" onClick={() => setIsMobileMenuOpen(false)} className="w-full flex items-center space-x-3 px-3 py-3 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg font-medium transition-colors text-left">
+                  <ExternalLink className="w-5 h-5" />
+                  <span>Use Latest Version App</span>
+                </a>
                 {user?.email === 'aistoryimage1999@gmail.com' && (
                   <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center space-x-3 px-3 py-3 text-red-600 hover:bg-red-50 rounded-lg font-medium transition-colors">
                     <ShieldAlert className="w-5 h-5" />

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download } from 'lucide-react';
+import { Download, ExternalLink } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { usePWA } from '../hooks/usePWA';
 import toast from 'react-hot-toast';
@@ -14,10 +14,6 @@ export default function InstallAppButton() {
       setIsInstalled(true);
     }
   }, []);
-
-  if (isInstalled) {
-    return null;
-  }
 
   const handleInstallClick = async () => {
     if (isInstallable) {
@@ -37,16 +33,34 @@ export default function InstallAppButton() {
   };
 
   return (
-    <button
-      onClick={handleInstallClick}
-      className={cn(
-        "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white",
-        "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:from-blue-800 active:to-indigo-800 rounded-full",
-        "transition-colors shadow-sm whitespace-nowrap self-center"
-      )}
-    >
-      <Download size={14} />
-      <span>Install App</span>
-    </button>
+    <div className="flex flex-col items-center sm:items-start gap-1 py-0.5">
+      <button
+        onClick={handleInstallClick}
+        title="Download / Install JEE Community App"
+        className={cn(
+          "flex items-center justify-center gap-1.5 px-3 py-1 text-[11px] font-bold text-white",
+          "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:from-blue-800 rounded-full",
+          "transition-all shadow-sm whitespace-nowrap"
+        )}
+      >
+        <Download size={12} />
+        <span>Download Karwa Version</span>
+      </button>
+
+      <a
+        href="https://jee-community.netlify.app"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Open Latest Netlify App"
+        className={cn(
+          "flex items-center justify-center gap-1 px-3 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300",
+          "bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-300 dark:border-emerald-700 rounded-full",
+          "transition-all shadow-xs whitespace-nowrap"
+        )}
+      >
+        <ExternalLink size={11} />
+        <span>Use Latest Version App</span>
+      </a>
+    </div>
   );
 }
