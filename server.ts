@@ -811,18 +811,27 @@ app.post('/api/admin/send-reminders', async (req, res) => {
       </html>
     `;
 
-    const mailOptions = {
-      from: '"JEE Community" <' + process.env.GMAIL_USER + '>',
-      to: process.env.GMAIL_USER, // Send to self
-      bcc: emails,                // BCC all users
-      subject: subject,
-      html: htmlContent
-    };
+    const batchSize = 50;
+    let sentCount = 0;
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log("Emails sent: ", info.response);
+    for (let i = 0; i < emails.length; i += batchSize) {
+      const batch = emails.slice(i, i + batchSize);
+      if (batch.length === 0) continue;
+
+      const mailOptions = {
+        from: '"JEE Community" <' + process.env.GMAIL_USER + '>',
+        to: process.env.GMAIL_USER,
+        bcc: batch,
+        subject: subject,
+        html: htmlContent
+      };
+
+      const info = await transporter.sendMail(mailOptions);
+      sentCount += batch.length;
+      console.log(`Batch ${i / batchSize + 1} sent to ${batch.length} users:`, info.response);
+    }
     
-    res.json({ success: true, message: "Emails sent successfully!" });
+    res.json({ success: true, message: `Emails sent successfully to ${sentCount} users!` });
   } catch (error: any) {
     console.error("Error sending emails:", error);
     res.status(500).json({ error: "Failed to send emails: " + error.message });
