@@ -1,4 +1,6 @@
-import { initializeApp, FirebaseApp } from 'firebase/app';
+import fs from 'fs';
+
+const content = `import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence, Auth } from 'firebase/auth';
 import { getFirestore, Firestore, initializeFirestore } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
@@ -57,3 +59,7 @@ if (isFirebaseConfigured()) {
 }
 
 export { app, auth, db, storage, messaging };
+`;
+
+fs.writeFileSync('src/firebase.ts', content, 'utf8');
+console.log("Updated src/firebase.ts with REAL community-6fe4e config!");
