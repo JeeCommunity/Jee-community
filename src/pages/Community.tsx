@@ -140,7 +140,13 @@ export default function Community() {
               )}
             </button>
             <InstallAppButton />
-            
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#5E51D9] hover:bg-[#4e42c2] text-white text-xs font-bold rounded-xl shadow-xs transition-all active:scale-95 my-2"
+            >
+              <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+              <span>+ Ask Doubt</span>
+            </button>
           </div>
 
         </div>
@@ -201,9 +207,10 @@ export default function Community() {
         {!profile?.isBlocked && (
           <button
             onClick={() => setIsModalOpen(true)}
-            className="fixed bottom-6 right-6 w-14 h-14 bg-[#5E51D9] text-white rounded-full shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-all z-40"
+            className="fixed bottom-24 right-6 sm:bottom-8 sm:right-8 bg-[#5E51D9] hover:bg-[#4d40c6] text-white rounded-full shadow-2xl flex items-center justify-center gap-2 px-5 py-3.5 hover:scale-105 active:scale-95 transition-all z-40 font-bold text-sm border-2 border-white/20"
           >
-            <Plus className="w-7 h-7" strokeWidth={2.5} />
+            <Plus className="w-5 h-5" strokeWidth={3} />
+            <span>Post Doubt</span>
           </button>
         )}
 

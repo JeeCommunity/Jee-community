@@ -98,7 +98,13 @@
       iframe[title*="Netlify" i],
       iframe[src*="netlify" i],
       div[id*="netlify"],
-      div[id*="nl-hud"] {
+      div[id*="nl-hud"],
+      netlify-badge,
+      .netlify-badge,
+      [class*="netlify-badge"],
+      [id*="netlify-badge"],
+      a[href*="netlify.com"],
+      div:has(> a[href*="netlify.com"]) {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
@@ -125,10 +131,24 @@
         } catch (e) {}
 
         var killFrames = function() {
-          var frames = document.querySelectorAll('#nl-badge-frame, #nl-hud-frame, iframe[title*="Netlify" i], iframe[id^="nl-"]');
-          for (var i = 0; i < frames.length; i++) {
-            try { frames[i].remove(); } catch (e) { frames[i].style.display = 'none'; }
+          var elements = document.querySelectorAll(
+            '#nl-badge-frame, #nl-hud-frame, iframe[title*="Netlify" i], iframe[id^="nl-"], netlify-badge, [class*="netlify-badge"], [id*="netlify-badge"], a[href*="netlify.com"]'
+          );
+          for (var i = 0; i < elements.length; i++) {
+            try { elements[i].remove(); } catch (e) { elements[i].style.display = 'none'; elements[i].style.pointerEvents = 'none'; }
           }
+          // Search elements whose inner text contains "Powered by Netlify"
+          try {
+            var allLinks = document.querySelectorAll('a, button, div, span');
+            for (var k = 0; k < allLinks.length; k++) {
+              var el = allLinks[k];
+              if (el && el.innerText && el.innerText.trim().indexOf('Powered by Netlify') !== -1 && el.children.length < 5) {
+                el.style.display = 'none';
+                el.style.pointerEvents = 'none';
+                try { el.remove(); } catch(err) {}
+              }
+            }
+          } catch(e) {}
         };
 
         if (typeof MutationObserver !== 'undefined') {
@@ -141,10 +161,13 @@
                   if (
                     node.id === 'nl-badge-frame' ||
                     node.id === 'nl-hud-frame' ||
+                    (node.tagName === 'NETLIFY-BADGE') ||
+                    (node.tagName === 'A' && (node.href || '').indexOf('netlify.com') !== -1) ||
                     (node.tagName === 'IFRAME' && (node.title || '').toLowerCase().indexOf('netlify') !== -1) ||
-                    (node.tagName === 'SCRIPT' && (node.src || '').indexOf('/.netlify/scripts/hud') !== -1)
+                    (node.tagName === 'SCRIPT' && (node.src || '').indexOf('/.netlify/scripts/hud') !== -1) ||
+                    ((node.innerText || '').indexOf('Powered by Netlify') !== -1 && node.children.length < 5)
                   ) {
-                    try { node.remove(); } catch (e) { node.style.display = 'none'; }
+                    try { node.remove(); } catch (e) { node.style.display = 'none'; node.style.pointerEvents = 'none'; }
                   }
                 }
               }
@@ -155,7 +178,7 @@
 
         window.addEventListener('DOMContentLoaded', killFrames);
         window.addEventListener('load', killFrames);
-        setInterval(killFrames, 1000);
+        setInterval(killFrames, 800);
       })();
     </script>
   </head>

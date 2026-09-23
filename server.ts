@@ -110,6 +110,16 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
 const app = express();
 const PORT = 3000;
 
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json());
 
 // API routes for AI Assistant
@@ -745,11 +755,13 @@ app.post('/api/admin/send-reminders', async (req, res) => {
     const targetUrl = actionUrl || "https://jee-community.netlify.app";
     const targetText = actionText || "Open JEE Community App 🚀";
 
+    const cleanedPassword = (process.env.GMAIL_APP_PASSWORD || "").replace(/[\s\u00A0-]/g, "");
+
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_APP_PASSWORD,
+        user: (process.env.GMAIL_USER || "").trim(),
+        pass: cleanedPassword,
       }
     });
 

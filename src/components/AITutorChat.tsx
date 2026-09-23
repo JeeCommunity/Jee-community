@@ -139,7 +139,7 @@ export default function AITutorChat() {
           <button
             ref={buttonRef}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-            className="fixed bottom-24 right-6 p-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full shadow-xl hover:shadow-2xl hover:scale-105 transition-all z-[100] group flex items-center justify-center cursor-move"
+            className="fixed bottom-40 right-6 p-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full shadow-xl hover:shadow-2xl hover:scale-105 transition-all z-[100] group flex items-center justify-center cursor-move"
           >
             <Bot className="w-7 h-7 pointer-events-none" />
             <span className="absolute right-full mr-4 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-sm font-semibold py-1.5 px-3 rounded-lg shadow-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">

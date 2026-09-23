@@ -271,8 +271,61 @@ export default function AdminDashboard() {
     setIsDeletingOld(false);
   };
 
-  const handleBroadcast = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const CLOUD_RUN_SERVER_URL = "https://ais-pre-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app";
+
+  const sendBroadcastToServer = async (payload: {
+    subject: string;
+    message: string;
+    emails: string[];
+    actionUrl: string;
+    actionText: string;
+  }) => {
+    const isNetlify = typeof window !== 'undefined' && window.location.hostname.includes('netlify.app');
+    const urlsToTry = isNetlify
+      ? [`${CLOUD_RUN_SERVER_URL}/api/admin/send-reminders`, '/api/admin/send-reminders']
+      : ['/api/admin/send-reminders', `${CLOUD_RUN_SERVER_URL}/api/admin/send-reminders`];
+
+    let lastErrorMsg = '';
+
+    for (const url of urlsToTry) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const text = await response.text();
+        if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+          continue;
+        }
+
+        let data: any = {};
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          continue;
+        }
+
+        if (response.ok && data.success) {
+          return data;
+        }
+        if (data.error) {
+          throw new Error(data.error);
+        }
+      } catch (err: any) {
+        lastErrorMsg = err?.message || 'Server error';
+        if (lastErrorMsg.includes('credentials') || lastErrorMsg.includes('Invalid') || lastErrorMsg.includes('Failed to send')) {
+          throw new Error(lastErrorMsg);
+        }
+      }
+    }
+
+    throw new Error(lastErrorMsg || 'Could not connect to email delivery server');
+  };
+
+  const handleBroadcast = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!broadcastSubject.trim() || !broadcastMessage.trim()) {
       toast.error("Subject and message are required");
       return;
@@ -285,7 +338,7 @@ export default function AdminDashboard() {
       const usersSnap = await getDocs(collection(db, 'users'));
       const emails = usersSnap.docs
         .map(doc => doc.data().email)
-        .filter(email => email);
+        .filter(email => email && email.includes('@'));
         
       if (emails.length === 0) {
         toast.error("No registered users with email found", { id: toastId });
@@ -293,36 +346,17 @@ export default function AdminDashboard() {
         return;
       }
       
-      toast.loading(`Sending email to ${emails.length} users...`, { id: toastId });
+      toast.loading(`Sending direct email to ${emails.length} users...`, { id: toastId });
 
-      const response = await fetch('/api/admin/send-reminders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: broadcastSubject,
-          message: broadcastMessage,
-          emails: emails,
-          actionUrl: broadcastActionUrl,
-          actionText: broadcastActionText
-        })
+      await sendBroadcastToServer({
+        subject: broadcastSubject,
+        message: broadcastMessage,
+        emails: emails,
+        actionUrl: broadcastActionUrl,
+        actionText: broadcastActionText
       });
 
-      const text = await response.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(text);
-      } catch (parseErr) {
-        if (text.includes("<!DOCTYPE") || text.includes("<html") || response.status === 404) {
-          throw new Error("Netlify static hosting par direct server API nahi chalta. Kripya neeche 'Open in Gmail' ya 'Copy All Emails' button use karein!");
-        }
-        throw new Error("Server error: " + text.slice(0, 100));
-      }
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to send broadcast");
-      }
-
-      toast.success(`Successfully sent emails to ${emails.length} users!`, { id: toastId });
+      toast.success(`Successfully sent emails directly to ${emails.length} users!`, { id: toastId, duration: 6000 });
     } catch (err: any) {
       console.error("Broadcast error:", err);
       toast.error(err.message || "Failed to send emails", { id: toastId, duration: 6000 });
@@ -331,47 +365,27 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleTestEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleTestEmail = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!broadcastSubject.trim() || !broadcastMessage.trim()) {
       toast.error("Subject and message are required");
       return;
     }
     
     setIsTestingEmail(true);
-    const toastId = toast.loading("Sending test email to you...");
+    const testEmail = user?.email || 'aistoryimage1999@gmail.com';
+    const toastId = toast.loading(`Sending test email to ${testEmail}...`);
     
     try {
-      const testEmail = user?.email || 'aistoryimage1999@gmail.com';
-
-      const response = await fetch('/api/admin/send-reminders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: `[TEST] ${broadcastSubject}`,
-          message: broadcastMessage,
-          emails: [testEmail],
-          actionUrl: broadcastActionUrl,
-          actionText: broadcastActionText
-        })
+      await sendBroadcastToServer({
+        subject: `[TEST] ${broadcastSubject}`,
+        message: broadcastMessage,
+        emails: [testEmail],
+        actionUrl: broadcastActionUrl,
+        actionText: broadcastActionText
       });
 
-      const text = await response.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(text);
-      } catch (parseErr) {
-        if (text.includes("<!DOCTYPE") || text.includes("<html") || response.status === 404) {
-          throw new Error("Netlify static hosting par direct server API nahi chalta. Kripya neeche 'Open in Gmail' ya 'Copy All Emails' button use karein!");
-        }
-        throw new Error("Server error: " + text.slice(0, 100));
-      }
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to send test email");
-      }
-
-      toast.success(`Test email sent successfully to ${testEmail}!`, { id: toastId });
+      toast.success(`Test email sent successfully to ${testEmail}!`, { id: toastId, duration: 6000 });
     } catch (err: any) {
       console.error("Test email error:", err);
       toast.error(err.message || "Failed to send test email", { id: toastId, duration: 6000 });
@@ -1425,71 +1439,37 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Sending Options / Action Bar */}
+            {/* Sending Actions */}
             <div className="pt-6 mt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
-              {/* Option 1: Direct 1-Click via Gmail App / Web (Works 100% on Netlify and Mobile) */}
-              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-200 dark:border-emerald-800/60 p-4 rounded-2xl">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                      1-Click Send via Gmail (Recommended for Netlify & Mobile)
-                    </h4>
-                    <p className="text-xs text-emerald-700/80 dark:text-emerald-400 mt-0.5">
-                      Apne phone ke Gmail app me saare students ke BCC, Subject aur Message ke sath 1 tap me open karein.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleCopyAllEmails}
-                      className="px-3 py-2 bg-white dark:bg-slate-900 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      Copy All 240 Emails (BCC)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleOpenInGmail}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-colors"
-                    >
-                      <Mail className="w-3.5 h-3.5" />
-                      Open in Gmail App 🚀
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Option 2: Background Automated Server Broadcast */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                 <button
                   type="button"
                   onClick={handleTestEmail}
                   disabled={isBroadcasting || isTestingEmail}
-                  className="w-full sm:w-auto px-5 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white font-bold text-xs rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full sm:w-auto px-6 py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white font-bold text-xs rounded-xl border border-slate-300 dark:border-slate-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-xs active:scale-95"
                 >
                   {isTestingEmail ? (
                     <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
                   ) : (
                     <Mail className="w-4 h-4 text-slate-600 dark:text-slate-300" />
                   )}
-                  <span>Send Test to Me ({user?.email || 'Admin'})</span>
+                  <span>Send Test to Me ({user?.email || 'aistoryimage1999@gmail.com'})</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => {
-                    if (confirm(`Are you sure you want to send this broadcast email to ALL registered users?`)) {
+                    if (confirm(`Are you sure you want to send this broadcast email directly to ALL registered users?`)) {
                       handleBroadcast();
                     }
                   }}
                   disabled={isBroadcasting || isTestingEmail || !broadcastSubject.trim() || !broadcastMessage.trim()}
-                  className="w-full sm:w-auto px-7 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-500/25 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-500/25 transition-all disabled:opacity-50 flex items-center justify-center gap-2.5 active:scale-95"
                 >
                   {isBroadcasting ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Broadcasting to Users...</span>
+                      <span>Sending Broadcast directly...</span>
                     </>
                   ) : (
                     <>
@@ -1497,6 +1477,18 @@ export default function AdminDashboard() {
                       <span>Send Server Broadcast ({totalUsersCount || 'All'} Users)</span>
                     </>
                   )}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-slate-400 dark:text-slate-500 px-1 pt-1">
+                <span>⚡ Direct automated server delivery (no Gmail app required)</span>
+                <button
+                  type="button"
+                  onClick={handleCopyAllEmails}
+                  className="text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 font-medium flex items-center gap-1 transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>Copy Emails</span>
                 </button>
               </div>
             </div>

@@ -793,7 +793,7 @@ ${meetData.meetingUri}`,
                     )}
 
                     {/* Chat Input Area */}
-                    <div className="p-4 bg-white border-t border-slate-100 shrink-0">
+                    <div className="p-3 pb-16 sm:p-4 sm:pb-4 bg-white border-t border-slate-100 shrink-0">
                        {replyingTo && (
                           <div className="flex items-center justify-between bg-slate-50 px-4 py-2 rounded-t-xl border-x border-t border-slate-100 -mb-2 relative z-0">
                              <div className="flex items-center gap-2 min-w-0">
@@ -841,7 +841,7 @@ ${meetData.meetingUri}`,
                              />
                           </div>
                           
-                          <button type="submit" disabled={!newMessage.trim()} className="w-12 h-12 shrink-0 rounded-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-md shadow-blue-500/20 active:scale-95 mb-0.5">
+                          <button type="submit" disabled={!newMessage.trim()} className="w-12 h-12 shrink-0 rounded-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-md shadow-blue-500/20 active:scale-95 mb-0.5 mr-2 sm:mr-0">
                              <Send className="w-5 h-5 ml-0.5" />
                           </button>
                        </form>
