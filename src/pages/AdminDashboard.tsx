@@ -2,18 +2,95 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { db } from '../firebase';
 import { collection, query, orderBy, doc, deleteDoc, getDocs, updateDoc, where, limit, getCountFromServer, startAfter, or, addDoc, serverTimestamp } from 'firebase/firestore';
-import { Play, Lock, Unlock, Pause, Trash2, Users, FileText, ShieldAlert, Ban, Eye, X, CheckCircle2, MessageSquareQuote, MessageCircle, RefreshCw, Mail, Send } from 'lucide-react';
+import { Play, Lock, Unlock, Pause, Trash2, Users, FileText, ShieldAlert, Ban, Eye, X, CheckCircle2, MessageSquareQuote, MessageCircle, RefreshCw, Mail, Send, Sparkles, ExternalLink, Globe, BookOpen, Check, Copy, Eye as EyeIcon, Edit3 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import { Navigate, Link } from 'react-router-dom';
 import { getFirstName, cn } from '../lib/utils';
 import AdminStudyGroupModal from '../components/AdminStudyGroupModal';
 
+const BROADCAST_TEMPLATES = [
+  {
+    id: 'all-new-features',
+    title: '🚀 Mega Update: All New Features & Fast Web Link',
+    badge: 'Recommended',
+    subject: '🎉 Mega Update: New Features, Notes Hub & Fast Website Live! 🚀',
+    actionText: 'Open JEE Community App 🚀',
+    actionUrl: 'https://jee-community.netlify.app',
+    message: `Namaste JEE Aspirants! 🌟
+
+JEE Community platform par bohot saare naye aur exciting features launch ho chuke hain jo aapki JEE Main & Advanced preparation ko aur bhi aasaan aur superfast banayenge!
+
+✨ Naye Features Ki Puri List:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 1. New Fast Website Link:
+Ab aap directly hamari official superfast website par bina kisi rukawat ke study kar sakte hain:
+👉 https://jee-community.netlify.app
+
+📱 2. Download Latest Version (Home Screen Install):
+Website open karte hi top bar me "Download Latest Version" par click karein aur app ko direct apne phone ki Home Screen par install karein — bilkul native app ki tarah fast, clean aur ad-free!
+
+📚 3. Notes Hub & Formula Sheets:
+Physics, Chemistry aur Mathematics ke top toppers ke handwritten notes, chapter-wise formula cheat sheets aur revision material ab ek click me available hain.
+
+💡 4. AI Doubt Solving & Clean KaTeX Math:
+Complex numericals, calculus formulas aur reaction mechanisms ab crystal-clear KaTeX format me solve honge. AI Solve button se instant step-by-step guidance payein!
+
+👥 5. Live Study Rooms & Group Discussions:
+Apne friends aur serious aspirants ke sath milkar live self-study room join karein, timer lagakar padhai karein aur doubts instantly discuss karein.
+
+⚡ 6. Levels, Badges & Streaks:
+Doubt solve karke points aur Level up (Lvl 11+) karein! Community leaderboard me apna rank banayein aur regular study streak maintain karein.
+
+Abhi neeche diye gaye button par click karke naye features explore karein aur apni study start karein:`
+  },
+  {
+    id: 'doubts-session',
+    title: '⚡ Doubts Pending? Clear Them Today!',
+    badge: 'Doubt Solver',
+    subject: '⚡ Doubts Pending? Let\'s Clear Them Together on JEE Community! 🎯',
+    actionText: 'Solve Doubts Now 💡',
+    actionUrl: 'https://jee-community.netlify.app',
+    message: `Hello JEE Aspirants! 🚀
+
+Kya aapke Physics, Chemistry ya Mathematics ke numericals aur concepts atke hue hain? 
+Akele pareshan hone ki bilkul zaroorat nahi hai!
+
+JEE Community par abhi aao aur:
+1. Apna doubt photo ya text ke roop me post karein
+2. Peers, mentors aur AI Solver se instant step-by-step solution payein
+3. Live study room me baith kar focused self-study karein
+
+Aapki dream IIT rank regular practice aur daily doubt clearance se hi banegi. Let's study together!
+
+Click below to open the app:`
+  },
+  {
+    id: 'notes-hub',
+    title: '📚 Free Handwritten Notes & Formula Sheets',
+    badge: 'Study Material',
+    subject: '📚 Free JEE Handwritten Notes & Formula Sheets Available Now!',
+    actionText: 'Download Notes Free 📖',
+    actionUrl: 'https://jee-community.netlify.app/notes',
+    message: `Hello JEE Champions! 📖
+
+Humne JEE Community ke "Notes Hub" me high-yield revision material live kar diya hai:
+• Physics Most Important Formulas & Derivations
+• Chemistry Organic Mechanisms & Reaction Charts
+• Mathematics Quick Formula Revision Sheets
+
+Sabhi notes verified aur completely free hain. Neeche diye button par click karein aur revision shuru karein:`
+  }
+];
+
 export default function AdminDashboard() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'posts' | 'users' | 'reports' | 'feedback' | 'beats' | 'groups' | 'broadcast'>('posts');
-  const [broadcastSubject, setBroadcastSubject] = useState('');
-  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastSubject, setBroadcastSubject] = useState(BROADCAST_TEMPLATES[0].subject);
+  const [broadcastMessage, setBroadcastMessage] = useState(BROADCAST_TEMPLATES[0].message);
+  const [broadcastActionUrl, setBroadcastActionUrl] = useState(BROADCAST_TEMPLATES[0].actionUrl);
+  const [broadcastActionText, setBroadcastActionText] = useState(BROADCAST_TEMPLATES[0].actionText);
+  const [broadcastViewTab, setBroadcastViewTab] = useState<'edit' | 'preview'>('edit');
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [isTestingEmail, setIsTestingEmail] = useState(false);
   const [pendingBeats, setPendingBeats] = useState<any[]>([]);
@@ -224,7 +301,9 @@ export default function AdminDashboard() {
         body: JSON.stringify({
           subject: broadcastSubject,
           message: broadcastMessage,
-          emails: emails
+          emails: emails,
+          actionUrl: broadcastActionUrl,
+          actionText: broadcastActionText
         })
       });
 
@@ -235,8 +314,6 @@ export default function AdminDashboard() {
       }
 
       toast.success(`Successfully sent emails to ${emails.length} users!`, { id: toastId });
-      setBroadcastSubject('');
-      setBroadcastMessage('');
     } catch (err: any) {
       console.error("Broadcast error:", err);
       toast.error(err.message || "Failed to send emails", { id: toastId });
@@ -264,7 +341,9 @@ export default function AdminDashboard() {
         body: JSON.stringify({
           subject: `[TEST] ${broadcastSubject}`,
           message: broadcastMessage,
-          emails: [testEmail]
+          emails: [testEmail],
+          actionUrl: broadcastActionUrl,
+          actionText: broadcastActionText
         })
       });
 
@@ -960,77 +1039,365 @@ export default function AdminDashboard() {
             )}
           </div>
         ) : activeTab === 'broadcast' ? (
-          <div className="p-6 md:p-8 max-w-3xl mx-auto">
-            <div className="mb-6 flex items-center space-x-3 text-slate-900 dark:text-white">
-              <div className="p-3 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-xl">
-                <Mail className="w-6 h-6" />
+          <div className="p-4 sm:p-6 md:p-8 max-w-4xl mx-auto">
+            {/* Header & Target Audience Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-2xl shadow-md">
+                  <Mail className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    Broadcast Email Studio
+                    <span className="text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-300 dark:border-emerald-800">
+                      Live
+                    </span>
+                  </h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Send announcements, updates, and reminders to all registered students.</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-xl font-bold">Broadcast Emails to Users</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Send an email notification to all registered users.</p>
+
+              <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 px-3.5 py-2 rounded-xl text-xs">
+                <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span className="font-semibold text-blue-900 dark:text-blue-200">
+                  Target: <strong className="text-blue-600 dark:text-blue-400">{totalUsersCount || 'All'} Users</strong> (via BCC)
+                </span>
               </div>
             </div>
 
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Email Subject
-                </label>
-                <input
-                  type="text"
-                  value={broadcastSubject}
-                  onChange={(e) => setBroadcastSubject(e.target.value)}
-                  placeholder="e.g., Pending Doubts? Let's clear them today! 🚀"
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-white"
-                  required
-                />
+            {/* Quick Templates Selector */}
+            <div className="mb-6 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  Ready-Made Templates (Click to apply)
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">1-click pre-fill</span>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Email Message
-                </label>
-                <textarea
-                  value={broadcastMessage}
-                  onChange={(e) => setBroadcastMessage(e.target.value)}
-                  placeholder="Hello [User],\n\nWe missed you at JEE Community! Your study room is waiting..."
-                  rows={6}
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-white resize-none"
-                  required
-                ></textarea>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-                  A "Resume Study Now" button with a link to the platform will be automatically added to the bottom of the email.
-                </p>
+              <div className="grid sm:grid-cols-3 gap-2.5">
+                {BROADCAST_TEMPLATES.map((tmpl) => (
+                  <button
+                    key={tmpl.id}
+                    type="button"
+                    onClick={() => {
+                      setBroadcastSubject(tmpl.subject);
+                      setBroadcastMessage(tmpl.message);
+                      setBroadcastActionUrl(tmpl.actionUrl);
+                      setBroadcastActionText(tmpl.actionText);
+                      toast.success(`Template applied: ${tmpl.title}`);
+                    }}
+                    className={cn(
+                      "text-left p-3 rounded-xl border transition-all relative group flex flex-col justify-between",
+                      broadcastSubject === tmpl.subject 
+                        ? "bg-white dark:bg-slate-900 border-blue-500 ring-2 ring-blue-500/20 shadow-sm" 
+                        : "bg-white/70 dark:bg-slate-900/70 border-slate-200 dark:border-slate-700 hover:border-blue-300 hover:bg-white dark:hover:bg-slate-900"
+                    )}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 uppercase">
+                          {tmpl.badge}
+                        </span>
+                        {broadcastSubject === tmpl.subject && (
+                          <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        )}
+                      </div>
+                      <p className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-2">{tmpl.title}</p>
+                    </div>
+                  </button>
+                ))}
               </div>
+            </div>
 
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row gap-3">
+            {/* Tab Switcher: Compose vs Preview */}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
                 <button
                   type="button"
-                  onClick={handleTestEmail}
-                  disabled={isBroadcasting || isTestingEmail}
-                  className="flex items-center justify-center w-full sm:w-auto px-6 py-3 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white font-bold rounded-xl transition-colors disabled:opacity-70"
-                >
-                  {isTestingEmail ? (
-                    <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                  ) : (
-                    <Mail className="w-5 h-5 mr-2" />
+                  onClick={() => setBroadcastViewTab('edit')}
+                  className={cn(
+                    "flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    broadcastViewTab === 'edit'
+                      ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                   )}
-                  Send Test to Me Only
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  Compose & Edit
                 </button>
                 <button
                   type="button"
-                  onClick={handleBroadcast}
-                  disabled={isBroadcasting || isTestingEmail}
-                  className="flex items-center justify-center w-full sm:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors disabled:opacity-70"
-                >
-                  {isBroadcasting ? (
-                    <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                  ) : (
-                    <Send className="w-5 h-5 mr-2" />
+                  onClick={() => setBroadcastViewTab('preview')}
+                  className={cn(
+                    "flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    broadcastViewTab === 'preview'
+                      ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                   )}
-                  {isBroadcasting ? 'Sending...' : 'Send Broadcast to All Users'}
+                >
+                  <EyeIcon className="w-3.5 h-3.5" />
+                  Live Preview
                 </button>
               </div>
+
+              {/* Website link quick-copy button */}
+              <div className="flex items-center gap-1 text-xs">
+                <span className="text-slate-500 hidden sm:inline">Website:</span>
+                <a
+                  href="https://jee-community.netlify.app"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md"
+                >
+                  <Globe className="w-3 h-3" />
+                  jee-community.netlify.app
+                </a>
+              </div>
+            </div>
+
+            {broadcastViewTab === 'edit' ? (
+              <div className="space-y-5">
+                {/* Subject Input */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Email Subject
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(broadcastSubject);
+                          toast.success("Subject copied to clipboard! 📋");
+                        }}
+                        className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-semibold"
+                      >
+                        <Copy className="w-3 h-3" />
+                        Copy Subject
+                      </button>
+                      <span className="text-[11px] text-slate-400">({broadcastSubject.length} chars)</span>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={broadcastSubject}
+                    onChange={(e) => setBroadcastSubject(e.target.value)}
+                    placeholder="e.g., 🎉 Mega Update: New Features, Notes Hub & Fast Website Live! 🚀"
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-white font-medium text-sm"
+                    required
+                  />
+                </div>
+
+                {/* Quick Insert Toolbar */}
+                <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-slate-500 mr-1 font-medium">Quick Insert:</span>
+                    <button
+                      type="button"
+                      onClick={() => setBroadcastMessage(prev => prev + '\n\n👉 Website Link: https://jee-community.netlify.app')}
+                      className="px-2 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded text-xs font-medium border border-slate-200 dark:border-slate-700 flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      + New Web Link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBroadcastMessage(prev => prev + '\n\n📱 Download App: Website par "Download Latest Version" par click karke direct Home Screen par add karein.')}
+                      className="px-2 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded text-xs font-medium border border-slate-200 dark:border-slate-700 flex items-center gap-1"
+                    >
+                      📱 + Install Guide
+                    </button>
+                    {['🚀', '🔥', '📚', '💡', '✨', '🎯', '💎'].map(emoji => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => setBroadcastMessage(prev => prev + ' ' + emoji)}
+                        className="px-2 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-xs"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const fullCopy = `SUBJECT:\n${broadcastSubject}\n\nMESSAGE:\n${broadcastMessage}\n\nLINK:\n${broadcastActionUrl}`;
+                      navigator.clipboard.writeText(fullCopy);
+                      toast.success("Complete Email content copied! 📋");
+                    }}
+                    className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-bold border border-blue-200 dark:border-blue-800 flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" />
+                    Copy All (Full Email)
+                  </button>
+                </div>
+
+                {/* Message Textarea */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Email Body Message
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(broadcastMessage);
+                        toast.success("Message body copied to clipboard! 📋");
+                      }}
+                      className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-semibold"
+                    >
+                      <Copy className="w-3 h-3" />
+                      Copy Message
+                    </button>
+                  </div>
+                  <textarea
+                    value={broadcastMessage}
+                    onChange={(e) => setBroadcastMessage(e.target.value)}
+                    rows={12}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-white resize-y font-mono text-xs sm:text-sm leading-relaxed"
+                    required
+                  ></textarea>
+                </div>
+
+                {/* Call To Action Button Settings */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-blue-500" />
+                    Call-to-Action (CTA) Button Settings
+                  </span>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                        Button Label
+                      </label>
+                      <input
+                        type="text"
+                        value={broadcastActionText}
+                        onChange={(e) => setBroadcastActionText(e.target.value)}
+                        placeholder="e.g. Open JEE Community App 🚀"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                        Button Target URL
+                      </label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={broadcastActionUrl}
+                          onChange={(e) => setBroadcastActionUrl(e.target.value)}
+                          placeholder="https://jee-community.netlify.app"
+                          className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setBroadcastActionUrl('https://jee-community.netlify.app')}
+                          title="Reset to New Netlify Website URL"
+                          className="px-2.5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-blue-600 hover:text-white rounded-lg text-xs font-bold transition-colors"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Live Preview Mode */
+              <div className="bg-slate-100 dark:bg-slate-950 p-4 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-800">
+                <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200 text-slate-800">
+                  {/* Email Client Simulated Header */}
+                  <div className="bg-slate-50 p-3 border-b border-slate-200 text-xs text-slate-500 flex flex-col gap-1 font-sans">
+                    <div className="flex justify-between">
+                      <span><strong>From:</strong> JEE Community &lt;no-reply@jee-community&gt;</span>
+                      <span className="text-[10px] bg-slate-200 px-1.5 py-0.5 rounded font-mono">BCC: {totalUsersCount || 'All'} Students</span>
+                    </div>
+                    <div><strong>Subject:</strong> <span className="text-slate-900 font-semibold">{broadcastSubject || '(No Subject)'}</span></div>
+                  </div>
+
+                  {/* Rendered Email Body */}
+                  <div>
+                    {/* Header Banner */}
+                    <div className="bg-gradient-to-tr from-blue-600 to-indigo-600 p-6 text-center text-white">
+                      <div className="inline-block bg-white/20 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider mb-2">
+                        🎓 IIT-JEE Aspirants Community
+                      </div>
+                      <h1 className="text-2xl font-black tracking-tight text-white m-0">JEE Community</h1>
+                      <p className="text-xs text-indigo-100 mt-1">Free Doubt Solving • Notes Hub • Live Study Groups</p>
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-6 text-slate-800 text-sm leading-relaxed">
+                      <div className="whitespace-pre-wrap font-sans">
+                        {broadcastMessage || 'Your message will appear here...'}
+                      </div>
+
+                      {/* CTA Button */}
+                      <div className="text-center my-8">
+                        <a
+                          href={broadcastActionUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-sm px-8 py-3.5 rounded-xl shadow-lg shadow-blue-500/30 hover:opacity-95 transition-all"
+                        >
+                          {broadcastActionText || 'Open JEE Community App 🚀'}
+                        </a>
+                        <div className="text-center mt-2">
+                          <span className="text-xs text-slate-400 font-mono">{broadcastActionUrl}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="bg-slate-50 p-4 text-center text-slate-400 text-xs border-t border-slate-100">
+                      <p className="m-0 mb-1">You received this update because you are a verified member of the JEE Community platform.</p>
+                      <p className="m-0">© {new Date().getFullYear()} JEE Community. All rights reserved.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons Bar */}
+            <div className="pt-6 mt-6 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={handleTestEmail}
+                disabled={isBroadcasting || isTestingEmail}
+                className="w-full sm:w-auto px-5 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white font-bold text-xs rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isTestingEmail ? (
+                  <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
+                ) : (
+                  <Mail className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+                )}
+                <span>Send Test to Me ({user?.email || 'Admin'})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm(`Are you sure you want to send this broadcast email to ALL registered users?`)) {
+                    handleBroadcast();
+                  }
+                }}
+                disabled={isBroadcasting || isTestingEmail || !broadcastSubject.trim() || !broadcastMessage.trim()}
+                className="w-full sm:w-auto px-7 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-500/25 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isBroadcasting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Broadcasting to Users...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Send Broadcast to All ({totalUsersCount || 'All'} Users)</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         ) : activeTab === 'groups' ? (
