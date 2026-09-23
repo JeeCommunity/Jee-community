@@ -307,7 +307,16 @@ export default function AdminDashboard() {
         })
       });
 
-      const data = await response.json();
+      const text = await response.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch (parseErr) {
+        if (text.includes("<!DOCTYPE") || text.includes("<html") || response.status === 404) {
+          throw new Error("Netlify static hosting par direct server API nahi chalta. Kripya neeche 'Open in Gmail' ya 'Copy All Emails' button use karein!");
+        }
+        throw new Error("Server error: " + text.slice(0, 100));
+      }
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to send broadcast");
@@ -316,7 +325,7 @@ export default function AdminDashboard() {
       toast.success(`Successfully sent emails to ${emails.length} users!`, { id: toastId });
     } catch (err: any) {
       console.error("Broadcast error:", err);
-      toast.error(err.message || "Failed to send emails", { id: toastId });
+      toast.error(err.message || "Failed to send emails", { id: toastId, duration: 6000 });
     } finally {
       setIsBroadcasting(false);
     }
@@ -347,7 +356,16 @@ export default function AdminDashboard() {
         })
       });
 
-      const data = await response.json();
+      const text = await response.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch (parseErr) {
+        if (text.includes("<!DOCTYPE") || text.includes("<html") || response.status === 404) {
+          throw new Error("Netlify static hosting par direct server API nahi chalta. Kripya neeche 'Open in Gmail' ya 'Copy All Emails' button use karein!");
+        }
+        throw new Error("Server error: " + text.slice(0, 100));
+      }
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to send test email");
@@ -356,9 +374,56 @@ export default function AdminDashboard() {
       toast.success(`Test email sent successfully to ${testEmail}!`, { id: toastId });
     } catch (err: any) {
       console.error("Test email error:", err);
-      toast.error(err.message || "Failed to send test email", { id: toastId });
+      toast.error(err.message || "Failed to send test email", { id: toastId, duration: 6000 });
     } finally {
       setIsTestingEmail(false);
+    }
+  };
+
+  const handleCopyAllEmails = async () => {
+    const toastId = toast.loading("Fetching all student emails from database...");
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const emails = usersSnap.docs
+        .map(doc => doc.data().email)
+        .filter(email => email && email.includes('@'));
+      
+      const uniqueEmails = [...new Set(emails)];
+      if (uniqueEmails.length === 0) {
+        toast.error("No student emails found in database.", { id: toastId });
+        return;
+      }
+      
+      const emailString = uniqueEmails.join(', ');
+      await navigator.clipboard.writeText(emailString);
+      toast.success(`Copied ${uniqueEmails.length} student emails! Gmail BCC me paste karein. 📋`, { id: toastId, duration: 6000 });
+    } catch (err: any) {
+      toast.error("Failed to fetch emails: " + err.message, { id: toastId });
+    }
+  };
+
+  const handleOpenInGmail = async () => {
+    const toastId = toast.loading("Opening Gmail with pre-filled details...");
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const emails = usersSnap.docs
+        .map(doc => doc.data().email)
+        .filter(email => email && email.includes('@'));
+      
+      const uniqueEmails = [...new Set(emails)];
+      const fullBody = `${broadcastMessage}\n\n👉 Open Website: ${broadcastActionUrl}`;
+      
+      if (uniqueEmails.length > 0) {
+        await navigator.clipboard.writeText(uniqueEmails.join(', '));
+      }
+      
+      const bccList = uniqueEmails.slice(0, 60).join(',');
+      const mailtoUrl = `mailto:?bcc=${encodeURIComponent(bccList)}&subject=${encodeURIComponent(broadcastSubject)}&body=${encodeURIComponent(fullBody)}`;
+      window.location.href = mailtoUrl;
+      
+      toast.success(`Gmail open ho raha hai! Sabhi ${uniqueEmails.length} emails clipboard me bhi copy ho gaye hain. 📋`, { id: toastId, duration: 7000 });
+    } catch (err: any) {
+      toast.error("Error opening Gmail: " + err.message, { id: toastId });
     }
   };
 
@@ -1360,44 +1425,80 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Action Buttons Bar */}
-            <div className="pt-6 mt-6 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={handleTestEmail}
-                disabled={isBroadcasting || isTestingEmail}
-                className="w-full sm:w-auto px-5 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white font-bold text-xs rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {isTestingEmail ? (
-                  <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
-                ) : (
-                  <Mail className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-                )}
-                <span>Send Test to Me ({user?.email || 'Admin'})</span>
-              </button>
+            {/* Sending Options / Action Bar */}
+            <div className="pt-6 mt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
+              {/* Option 1: Direct 1-Click via Gmail App / Web (Works 100% on Netlify and Mobile) */}
+              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-200 dark:border-emerald-800/60 p-4 rounded-2xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                      1-Click Send via Gmail (Recommended for Netlify & Mobile)
+                    </h4>
+                    <p className="text-xs text-emerald-700/80 dark:text-emerald-400 mt-0.5">
+                      Apne phone ke Gmail app me saare students ke BCC, Subject aur Message ke sath 1 tap me open karein.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyAllEmails}
+                      className="px-3 py-2 bg-white dark:bg-slate-900 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy All 240 Emails (BCC)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenInGmail}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-colors"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      Open in Gmail App 🚀
+                    </button>
+                  </div>
+                </div>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  if (confirm(`Are you sure you want to send this broadcast email to ALL registered users?`)) {
-                    handleBroadcast();
-                  }
-                }}
-                disabled={isBroadcasting || isTestingEmail || !broadcastSubject.trim() || !broadcastMessage.trim()}
-                className="w-full sm:w-auto px-7 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-500/25 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {isBroadcasting ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Broadcasting to Users...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    <span>Send Broadcast to All ({totalUsersCount || 'All'} Users)</span>
-                  </>
-                )}
-              </button>
+              {/* Option 2: Background Automated Server Broadcast */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleTestEmail}
+                  disabled={isBroadcasting || isTestingEmail}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white font-bold text-xs rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isTestingEmail ? (
+                    <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
+                  ) : (
+                    <Mail className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+                  )}
+                  <span>Send Test to Me ({user?.email || 'Admin'})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm(`Are you sure you want to send this broadcast email to ALL registered users?`)) {
+                      handleBroadcast();
+                    }
+                  }}
+                  disabled={isBroadcasting || isTestingEmail || !broadcastSubject.trim() || !broadcastMessage.trim()}
+                  className="w-full sm:w-auto px-7 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-500/25 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isBroadcasting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Broadcasting to Users...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>Send Server Broadcast ({totalUsersCount || 'All'} Users)</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         ) : activeTab === 'groups' ? (
