@@ -748,8 +748,9 @@ app.post('/api/admin/send-reminders', async (req, res) => {
       return res.status(400).json({ error: "Invalid request payload." });
     }
     
-    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-      return res.status(500).json({ error: "Server email credentials are not configured." });
+    const gmailUser = process.env.GMAIL_USER || 'jeecommunity.updates@gmail.com';
+    if (!process.env.GMAIL_APP_PASSWORD) {
+      return res.status(500).json({ error: "Server email app password is not configured." });
     }
 
     // Respond immediately to prevent any client timeout / fetch fail
@@ -826,8 +827,8 @@ app.post('/api/admin/send-reminders', async (req, res) => {
 
           try {
             const mailOptions = {
-              from: '"JEE Community" <' + process.env.GMAIL_USER + '>',
-              to: process.env.GMAIL_USER,
+              from: '"JEE Community" <' + gmailUser + '>',
+              to: gmailUser,
               bcc: batch,
               subject: subject,
               html: htmlContent

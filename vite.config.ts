@@ -14,6 +14,14 @@ export default defineConfig(() => {
     build: {
       sourcemap: true,
       outDir: 'dist',
+      rollupOptions: {
+        onwarn(warning, warn) {
+          if (warning.message && (warning.message.includes('is dynamically imported by') || warning.message.includes('also statically imported by'))) {
+            return;
+          }
+          warn(warning);
+        }
+      }
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

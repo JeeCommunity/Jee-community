@@ -5,7 +5,7 @@ import { auth, db } from '../firebase';
 import { doc, collection, query, where, getDoc, getCountFromServer, getDocs, onSnapshot, limit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useState, useRef, useEffect  , useMemo } from 'react';
-import { Trophy, MonitorPlay, StickyNote, FileText, Building2, MessageSquareQuote, Share2, Download, ExternalLink } from 'lucide-react';
+import { Trophy, MonitorPlay, StickyNote, FileText, Building2, MessageSquareQuote, Share2, Download, ExternalLink, BookOpen } from 'lucide-react';
 import { usePWA } from '../hooks/usePWA';
 import FeedbackModal from './FeedbackModal';
 import WhatsNewModal from './WhatsNewModal';
@@ -429,9 +429,9 @@ export default function Layout() {
                       <ExternalLink className="w-4 h-4 mr-2" />
                       Use Latest Version App
                     </a>
-                    <Link to="/my-notes" className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center" onClick={() => setIsDropdownOpen(false)}>
-                      <StickyNote className="w-4 h-4 mr-2" />
-                      My Notes
+                    <Link to="/error-notes" className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-red-50 dark:hover:bg-slate-800 flex items-center font-medium" onClick={() => setIsDropdownOpen(false)}>
+                      <BookOpen className="w-4 h-4 mr-2 text-red-500" />
+                      📕 Error Notes
                     </Link>
                     <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center">
                       <LogOut className="w-4 h-4 mr-2" />
@@ -605,9 +605,9 @@ export default function Layout() {
                     {showNotesBadge && <span className="bg-green-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse shadow-sm">New</span>}
                   </div>
                 </Link>
-                <Link to="/my-notes" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center space-x-3 px-3 py-3 text-slate-700 dark:text-slate-300 hover:bg-blue-50 hover:text-blue-700 rounded-lg font-medium transition-colors">
-                  <StickyNote className="w-5 h-5" />
-                  <span>My Notes</span>
+                <Link to="/error-notes" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center space-x-3 px-3 py-3 text-slate-700 dark:text-slate-300 hover:bg-red-50 hover:text-red-700 rounded-lg font-medium transition-colors">
+                  <BookOpen className="w-5 h-5 text-red-500" />
+                  <span>📕 Error Notes</span>
                 </Link>
                 <Link to="/study-room" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center justify-between px-3 py-3 text-slate-700 dark:text-slate-300 hover:bg-indigo-50 hover:text-indigo-700 rounded-lg font-medium transition-colors">
                   <div className="flex items-center space-x-3">

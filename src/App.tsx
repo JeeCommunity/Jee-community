@@ -17,7 +17,7 @@ import { isFirebaseConfigured } from './firebase';
 
 import { PrivacyPolicy, TermsOfService, Disclaimer } from './pages/Legal';
 import { About } from './pages/About';
-import PersonalNotes from './pages/PersonalNotes';
+import ErrorNotes from './pages/ErrorNotes';
 import Whiteboard from './pages/Whiteboard';
 
 export default function App() {
@@ -62,7 +62,8 @@ export default function App() {
             <Route path="campus" element={<Campus />} />
             <Route path="calculator" element={<Calculator />} />
             <Route path="notes" element={<NotesHub />} />
-            <Route path="my-notes" element={<PersonalNotes />} />
+            <Route path="error-notes" element={<ErrorNotes />} />
+            <Route path="my-notes" element={<ErrorNotes />} />
             <Route path="whiteboard/:groupId" element={<Whiteboard />} />
             <Route path="admin" element={<AdminDashboard />} />
             <Route path="status-replies" element={<StatusReplies />} />

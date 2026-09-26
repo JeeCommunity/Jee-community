@@ -343,8 +343,7 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
       if (!response.ok) throw new Error(meetData.error?.message || "Failed to create meeting");
 
       await addDoc(collection(db, 'study_groups', activeGroup.id, 'messages'), {
-        text: `Join the Video Call! 📹
-${meetData.meetingUri}`,
+        text: `Join the Video Call! 📹\n${meetData.meetingUri}`,
         userId: user.uid,
         userName: profile?.fullName || profile?.username || "Unknown",
         userPhoto: profile?.photoURL || null,
@@ -357,13 +356,23 @@ ${meetData.meetingUri}`,
       
       toast.success("Video call started!", { id: 'meet-start' });
     } catch (e: any) {
-      console.error(e);
-      if (e.code === 'auth/popup-closed-by-user') {
-        toast.error("Popup was closed. Please select your Google account to start the call.", { id: 'meet-start', duration: 4000 });
-      } else if (e.code === 'auth/popup-blocked') {
-        toast.error("Popup blocked! Please allow popups for this site to start the call.", { id: 'meet-start', duration: 4000 });
-      } else {
-        toast.error("Failed to start video call: " + (e.message || "Unknown error"), { id: 'meet-start' });
+      console.warn("Google Meet creation failed, falling back to instant Jitsi Meet:", e);
+      try {
+        const jitsiUrl = `https://meet.jit.si/JEECommunityGroup-${activeGroup.id}`;
+        await addDoc(collection(db, 'study_groups', activeGroup.id, 'messages'), {
+          text: `Join the Instant Study Video Call! 📹\n${jitsiUrl}`,
+          userId: user.uid,
+          userName: profile?.fullName || profile?.username || "Unknown",
+          userPhoto: profile?.photoURL || null,
+          createdAt: serverTimestamp(),
+          type: 'meet',
+          meetUri: jitsiUrl,
+          isToxic: false,
+          toxicWords: []
+        });
+        toast.success("Instant video call link created!", { id: 'meet-start' });
+      } catch (fallbackErr: any) {
+        toast.error("Failed to start video call: " + (fallbackErr.message || "Unknown error"), { id: 'meet-start' });
       }
     }
   };
