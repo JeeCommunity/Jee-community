@@ -349,31 +349,18 @@ export default function AdminDashboard() {
     }
     
     setIsBroadcasting(true);
-    const toastId = toast.loading("Fetching users...");
+    const toastId = toast.loading("Triggering server-side email broadcast...");
     
     try {
-      const usersSnap = await getDocs(collection(db, 'users'));
-      const emails = usersSnap.docs
-        .map(doc => doc.data().email)
-        .filter(email => email && email.includes('@'));
-        
-      if (emails.length === 0) {
-        toast.error("No registered users with email found", { id: toastId });
-        setIsBroadcasting(false);
-        return;
-      }
-      
-      toast.loading(`Sending direct email to ${emails.length} users...`, { id: toastId });
-
       await sendBroadcastToServer({
         subject: broadcastSubject,
         message: broadcastMessage,
-        emails: emails,
+        emails: [],
         actionUrl: broadcastActionUrl,
         actionText: broadcastActionText
       });
 
-      toast.success(`Successfully sent emails directly to ${emails.length} users!`, { id: toastId, duration: 6000 });
+      toast.success("Server-side email broadcast started successfully!", { id: toastId, duration: 6000 });
     } catch (err: any) {
       console.error("Broadcast error:", err);
       toast.error(err.message || "Failed to send emails", { id: toastId, duration: 6000 });
@@ -391,18 +378,19 @@ export default function AdminDashboard() {
     
     setIsTestingEmail(true);
     const testEmail = user?.email || 'aistoryimage1999@gmail.com';
-    const toastId = toast.loading(`Sending test email to ${testEmail}...`);
+    const toastId = toast.loading(`Sending test email to ${testEmail} from server...`);
     
     try {
       await sendBroadcastToServer({
         subject: `[TEST] ${broadcastSubject}`,
         message: broadcastMessage,
-        emails: [testEmail],
+        emails: [],
         actionUrl: broadcastActionUrl,
-        actionText: broadcastActionText
-      });
+        actionText: broadcastActionText,
+        testEmail: testEmail
+      } as any);
 
-      toast.success(`Test email sent successfully to ${testEmail}!`, { id: toastId, duration: 6000 });
+      toast.success(`Test email sent successfully from server to ${testEmail}!`, { id: toastId, duration: 6000 });
     } catch (err: any) {
       console.error("Test email error:", err);
       toast.error(err.message || "Failed to send test email", { id: toastId, duration: 6000 });

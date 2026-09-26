@@ -742,10 +742,10 @@ app.post('/api/admin/stats/:type/:action', async (req, res) => {
 
 app.post('/api/admin/send-reminders', async (req, res) => {
   try {
-    const { subject, message, emails, actionUrl, actionText } = req.body;
+    const { subject, message, actionUrl, actionText, testEmail } = req.body;
 
-    if (!subject || !message || !emails || !Array.isArray(emails)) {
-      return res.status(400).json({ error: "Invalid request payload." });
+    if (!subject || !message) {
+      return res.status(400).json({ error: "Subject and message are required." });
     }
     
     const gmailUser = process.env.GMAIL_USER || 'jeecommunity.updates@gmail.com';
@@ -753,8 +753,31 @@ app.post('/api/admin/send-reminders', async (req, res) => {
       return res.status(500).json({ error: "Server email app password is not configured." });
     }
 
-    // Respond immediately to prevent any client timeout / fetch fail
-    res.json({ success: true, message: `Email broadcast started for ${emails.length} users!` });
+    let recipientEmails: string[] = [];
+    if (testEmail) {
+      recipientEmails = [testEmail];
+    } else {
+      try {
+        const db = getFirestore();
+        const usersSnap = await db.collection('users').get();
+        recipientEmails = usersSnap.docs
+          .map(doc => doc.data().email)
+          .filter((email: any) => email && typeof email === 'string' && email.includes('@'));
+      } catch (dbErr) {
+        console.error("Error fetching users from Firestore:", dbErr);
+        // Fallback to request body emails if provided
+        if (req.body.emails && Array.isArray(req.body.emails)) {
+          recipientEmails = req.body.emails;
+        }
+      }
+    }
+
+    if (!recipientEmails || recipientEmails.length === 0) {
+      return res.status(400).json({ error: "No recipient emails found." });
+    }
+
+    // Respond immediately to prevent client timeout
+    res.json({ success: true, message: `Email broadcast started for ${recipientEmails.length} users entirely from backend!` });
 
     // Process in background non-blocking
     setImmediate(async () => {
@@ -767,7 +790,7 @@ app.post('/api/admin/send-reminders', async (req, res) => {
         const transporter = nodemailer.createTransport({
           service: 'gmail',
           auth: {
-            user: (process.env.GMAIL_USER || "").trim(),
+            user: gmailUser.trim(),
             pass: cleanedPassword,
           }
         });
@@ -820,7 +843,7 @@ app.post('/api/admin/send-reminders', async (req, res) => {
 
         let sentCount = 0;
 
-        for (const recipientEmail of emails) {
+        for (const recipientEmail of recipientEmails) {
           if (!recipientEmail || !recipientEmail.includes('@')) continue;
 
           try {
@@ -833,14 +856,13 @@ app.post('/api/admin/send-reminders', async (req, res) => {
 
             await transporter.sendMail(mailOptions);
             sentCount += 1;
-            console.log(`Direct email sent to ${recipientEmail}`);
+            console.log(`Backend direct email sent to ${recipientEmail}`);
           } catch (err: any) {
-            console.error(`Failed to send direct email to ${recipientEmail}:`, err?.message);
+            console.error(`Failed to send backend direct email to ${recipientEmail}:`, err?.message);
           }
-          // Small delay to prevent Gmail rate limits
           await new Promise(r => setTimeout(r, 300));
         }
-        console.log(`Broadcast completed successfully to ${sentCount} users.`);
+        console.log(`Backend broadcast completed successfully to ${sentCount} users.`);
       } catch (bgErr) {
         console.error("Background email dispatch error:", bgErr);
       }
