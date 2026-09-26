@@ -54,6 +54,8 @@
     "ws": "^8.21.1"
   },
   "devDependencies": {
-    "@types/nodemailer": "^8.0.1"
+    "@types/cors": "^2.8.19",
+    "@types/nodemailer": "^8.0.1",
+    "cors": "^2.8.6"
   }
 }

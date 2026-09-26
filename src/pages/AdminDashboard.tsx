@@ -280,6 +280,7 @@ export default function AdminDashboard() {
     emails: string[];
     actionUrl: string;
     actionText: string;
+    testEmail?: string;
   }) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const urlsToTry = [
