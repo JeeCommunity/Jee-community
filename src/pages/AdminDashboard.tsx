@@ -283,10 +283,10 @@ export default function AdminDashboard() {
   }) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const urlsToTry = [
+      'https://ais-pre-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app/api/admin/send-reminders',
       `${origin}/api/admin/send-reminders`,
       '/api/admin/send-reminders',
-      `${CLOUD_RUN_SERVER_URL}/api/admin/send-reminders`,
-      `${DEV_SERVER_URL}/api/admin/send-reminders`
+      'https://ais-dev-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app/api/admin/send-reminders'
     ];
 
     let lastErrorMsg = '';
