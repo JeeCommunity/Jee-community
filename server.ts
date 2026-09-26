@@ -851,14 +851,18 @@ app.post('/api/admin/send-reminders', async (req, res) => {
               from: '"JEE Community" <' + gmailUser + '>',
               to: recipientEmail,
               subject: subject,
-              html: htmlContent
+              html: htmlContent,
+              headers: {
+                'X-Entity-Ref-ID': 'jee-community-broadcast',
+                'X-Mailer': 'JEE Community Mailer'
+              }
             };
 
-            await transporter.sendMail(mailOptions);
+            const info = await transporter.sendMail(mailOptions);
             sentCount += 1;
-            console.log(`Backend direct email sent to ${recipientEmail}`);
+            console.log(`Backend direct email sent to ${recipientEmail}. Response:`, info.response);
           } catch (err: any) {
-            console.error(`Failed to send backend direct email to ${recipientEmail}:`, err?.message);
+            console.error(`Failed to send backend direct email to ${recipientEmail}:`, err?.message, err?.stack);
           }
           await new Promise(r => setTimeout(r, 300));
         }
