@@ -818,29 +818,27 @@ app.post('/api/admin/send-reminders', async (req, res) => {
           </html>
         `;
 
-        const batchSize = 50;
         let sentCount = 0;
 
-        for (let i = 0; i < emails.length; i += batchSize) {
-          const batch = emails.slice(i, i + batchSize);
-          if (batch.length === 0) continue;
+        for (const recipientEmail of emails) {
+          if (!recipientEmail || !recipientEmail.includes('@')) continue;
 
           try {
             const mailOptions = {
               from: '"JEE Community" <' + gmailUser + '>',
-              to: gmailUser,
-              bcc: batch,
+              to: recipientEmail,
               subject: subject,
               html: htmlContent
             };
 
-            const info = await transporter.sendMail(mailOptions);
-            sentCount += batch.length;
-            console.log(`Background Batch ${i / batchSize + 1} sent to ${batch.length} users:`, info.response);
-          } catch (batchErr) {
-            console.error(`Error sending batch ${i / batchSize + 1}:`, batchErr);
+            await transporter.sendMail(mailOptions);
+            sentCount += 1;
+            console.log(`Direct email sent to ${recipientEmail}`);
+          } catch (err: any) {
+            console.error(`Failed to send direct email to ${recipientEmail}:`, err?.message);
           }
-          await new Promise(r => setTimeout(r, 1000));
+          // Small delay to prevent Gmail rate limits
+          await new Promise(r => setTimeout(r, 300));
         }
         console.log(`Broadcast completed successfully to ${sentCount} users.`);
       } catch (bgErr) {
