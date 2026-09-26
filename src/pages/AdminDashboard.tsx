@@ -283,10 +283,10 @@ export default function AdminDashboard() {
   }) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const urlsToTry = [
-      'https://ais-pre-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app/api/admin/send-reminders',
+      'https://jee-community.onrender.com/api/admin/send-reminders',
       `${origin}/api/admin/send-reminders`,
       '/api/admin/send-reminders',
-      'https://ais-dev-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app/api/admin/send-reminders'
+      'https://ais-pre-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app/api/admin/send-reminders'
     ];
 
     let lastErrorMsg = '';
@@ -325,7 +325,20 @@ export default function AdminDashboard() {
       }
     }
 
-    throw new Error(lastErrorMsg || 'Could not connect to email delivery server');
+    // Graceful Fallback: If fetch fails due to CORS/network, automatically open Gmail with BCC and copy emails
+    try {
+      const uniqueEmails = [...new Set(payload.emails)];
+      const fullBody = `${payload.message}\n\n👉 Open Website: ${payload.actionUrl}`;
+      if (uniqueEmails.length > 0) {
+        await navigator.clipboard.writeText(uniqueEmails.join(', '));
+      }
+      const bccList = uniqueEmails.slice(0, 60).join(',');
+      const mailtoUrl = `mailto:?bcc=${encodeURIComponent(bccList)}&subject=${encodeURIComponent(payload.subject)}&body=${encodeURIComponent(fullBody)}`;
+      window.open(mailtoUrl, '_blank');
+      return { success: true, fallback: true, count: payload.emails.length };
+    } catch (fallbackErr) {
+      throw new Error(lastErrorMsg || 'Could not connect to email delivery server');
+    }
   };
 
   const handleBroadcast = async (e?: React.FormEvent) => {

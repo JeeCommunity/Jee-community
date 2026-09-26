@@ -8,7 +8,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "https://ais-pre-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app/api/:splat"
+  to = "https://jee-community.onrender.com/api/:splat"
   status = 200
   force = true
 
