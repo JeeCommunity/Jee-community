@@ -377,17 +377,18 @@ export default function LiveStudy() {
       const session = studySessionRef.current;
       const todayDate = getLocalDate();
       let totalSeconds = session.accumulatedTime || 0;
+      const startTime = session.startTime || (session.lastUpdated?.toMillis ? session.lastUpdated.toMillis() : Date.now());
       if (session.dailyDate !== todayDate) {
         totalSeconds = 0;
-        if (session.isStudying && session.startTime) {
+        if (session.isStudying) {
           const now = new Date();
           const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-          const startForToday = Math.max(session.startTime, midnight);
+          const startForToday = Math.max(startTime, midnight);
           totalSeconds += Math.floor((Date.now() - startForToday) / 1000);
         }
       } else {
-        if (session.isStudying && session.startTime) {
-          totalSeconds += Math.floor((Date.now() - session.startTime) / 1000);
+        if (session.isStudying) {
+          totalSeconds += Math.floor((Date.now() - startTime) / 1000);
         }
       }
       const h = Math.floor(totalSeconds / 3600);
@@ -888,15 +889,16 @@ export default function LiveStudy() {
   function getSessionTime(s: any) {
     const todayDate = getLocalDate();
     let total = s.accumulatedTime || 0;
+    const startTime = s.startTime || (s.lastUpdated?.toMillis ? s.lastUpdated.toMillis() : Date.now());
     
     if (s.dailyDate !== todayDate) {
       total = 0;
-      if (s.isStudying && s.startTime) {
+      if (s.isStudying) {
         const nowDate = new Date();
-        const totalTimeStudied = Math.floor((nowDate.getTime() - s.startTime) / 1000);
+        const totalTimeStudied = Math.floor((nowDate.getTime() - startTime) / 1000);
         let effectiveEndTime = nowDate.getTime();
         if (totalTimeStudied > 3 * 3600) {
-           effectiveEndTime = s.startTime + 3 * 3600 * 1000;
+           effectiveEndTime = startTime + 3 * 3600 * 1000;
         }
 
         const midnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
@@ -908,8 +910,8 @@ export default function LiveStudy() {
         total += timeStudiedToday;
       }
     } else {
-      if (s.isStudying && s.startTime) {
-        let t = Math.floor((Date.now() - s.startTime) / 1000);
+      if (s.isStudying) {
+        let t = Math.floor((Date.now() - startTime) / 1000);
         if (t > 3 * 3600) {
            t = 3 * 3600;
         }

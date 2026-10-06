@@ -776,71 +776,92 @@ app.post('/api/admin/send-reminders', async (req, res) => {
       return res.status(400).json({ error: "No recipient emails found." });
     }
 
-    // Respond immediately to prevent client timeout
+    const cleanedPassword = (process.env.GMAIL_APP_PASSWORD || "").replace(/[\s\u00A0-]/g, "");
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: gmailUser.trim(),
+        pass: cleanedPassword,
+      }
+    });
+
+    const targetUrl = actionUrl || "https://jee-community.netlify.app";
+    const targetText = actionText || "Open JEE Community App 🚀";
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="margin: 0; padding: 20px 10px; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
+          
+          <!-- Header Banner -->
+          <div style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); padding: 32px 24px; text-align: center;">
+            <div style="display: inline-block; background: rgba(255, 255, 255, 0.2); padding: 6px 14px; border-radius: 9999px; margin-bottom: 12px;">
+              <span style="color: #ffffff; font-size: 13px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase;">🎓 IIT-JEE Aspirants Community</span>
+            </div>
+            <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">JEE Community</h1>
+            <p style="color: #e0e7ff; margin: 6px 0 0; font-size: 14px;">Free Doubt Solving • Notes Hub • Live Study Groups</p>
+          </div>
+
+          <!-- Body Content -->
+          <div style="padding: 32px 28px; color: #1e293b; line-height: 1.7; font-size: 15px;">
+            <div style="white-space: pre-wrap; word-break: break-word;">${message.replace(/\n/g, '<br>')}</div>
+
+            <!-- Action Button -->
+            <div style="text-align: center; margin: 36px 0 20px;">
+              <a href="${targetUrl}" target="_blank" style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); color: #ffffff; padding: 15px 36px; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 16px; display: inline-block; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35); text-transform: uppercase; letter-spacing: 0.5px;">
+                ${targetText}
+              </a>
+            </div>
+
+            <div style="text-align: center; margin-top: 10px;">
+              <a href="${targetUrl}" style="color: #64748b; font-size: 13px; text-decoration: underline;">${targetUrl}</a>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div style="background-color: #f8fafc; padding: 20px 24px; text-align: center; color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0;">
+            <p style="margin: 0 0 6px 0;">You received this update because you are a verified member of the JEE Community platform.</p>
+            <p style="margin: 0;">© ${new Date().getFullYear()} JEE Community. All rights reserved.</p>
+          </div>
+
+        </div>
+      </body>
+      </html>
+    `;
+
+    if (testEmail) {
+      try {
+        const mailOptions = {
+          from: '"JEE Community" <' + gmailUser + '>',
+          to: testEmail,
+          subject: subject,
+          html: htmlContent,
+          headers: {
+            'X-Entity-Ref-ID': 'jee-community-broadcast',
+            'X-Mailer': 'JEE Community Mailer'
+          }
+        };
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`Test email sent successfully to ${testEmail}. Response:`, info.response);
+        return res.json({ success: true, message: `Test email sent successfully to ${testEmail}!` });
+      } catch (testErr: any) {
+        console.error("Test email send failed:", testErr);
+        return res.status(500).json({ error: "Gmail SMTP Error: " + (testErr?.message || testErr) });
+      }
+    }
+
+    // Respond immediately for bulk broadcast
     res.json({ success: true, message: `Email broadcast started for ${recipientEmails.length} users entirely from backend!` });
 
-    // Process in background non-blocking
+    // Process bulk broadcast in background non-blocking
     setImmediate(async () => {
       try {
-        const targetUrl = actionUrl || "https://jee-community.netlify.app";
-        const targetText = actionText || "Open JEE Community App 🚀";
-
-        const cleanedPassword = (process.env.GMAIL_APP_PASSWORD || "").replace(/[\s\u00A0-]/g, "");
-
-        const transporter = nodemailer.createTransport({
-          service: 'gmail',
-          auth: {
-            user: gmailUser.trim(),
-            pass: cleanedPassword,
-          }
-        });
-
-        const htmlContent = `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          </head>
-          <body style="margin: 0; padding: 20px 10px; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-            <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
-              
-              <!-- Header Banner -->
-              <div style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); padding: 32px 24px; text-align: center;">
-                <div style="display: inline-block; background: rgba(255, 255, 255, 0.2); padding: 6px 14px; border-radius: 9999px; margin-bottom: 12px;">
-                  <span style="color: #ffffff; font-size: 13px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase;">🎓 IIT-JEE Aspirants Community</span>
-                </div>
-                <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">JEE Community</h1>
-                <p style="color: #e0e7ff; margin: 6px 0 0; font-size: 14px;">Free Doubt Solving • Notes Hub • Live Study Groups</p>
-              </div>
-
-              <!-- Body Content -->
-              <div style="padding: 32px 28px; color: #1e293b; line-height: 1.7; font-size: 15px;">
-                <div style="white-space: pre-wrap; word-break: break-word;">${message.replace(/\n/g, '<br>')}</div>
-
-                <!-- Action Button -->
-                <div style="text-align: center; margin: 36px 0 20px;">
-                  <a href="${targetUrl}" target="_blank" style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); color: #ffffff; padding: 15px 36px; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 16px; display: inline-block; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35); text-transform: uppercase; letter-spacing: 0.5px;">
-                    ${targetText}
-                  </a>
-                </div>
-
-                <div style="text-align: center; margin-top: 10px;">
-                  <a href="${targetUrl}" style="color: #64748b; font-size: 13px; text-decoration: underline;">${targetUrl}</a>
-                </div>
-              </div>
-
-              <!-- Footer -->
-              <div style="background-color: #f8fafc; padding: 20px 24px; text-align: center; color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0;">
-                <p style="margin: 0 0 6px 0;">You received this update because you are a verified member of the JEE Community platform.</p>
-                <p style="margin: 0;">© ${new Date().getFullYear()} JEE Community. All rights reserved.</p>
-              </div>
-
-            </div>
-          </body>
-          </html>
-        `;
-
         let sentCount = 0;
 
         for (const recipientEmail of recipientEmails) {
