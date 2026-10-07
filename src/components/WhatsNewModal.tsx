@@ -12,7 +12,7 @@ export default function WhatsNewModal() {
     if (!user) return;
     
     // Check local storage to see if user has seen this specific update
-    const updateKey = 'hasSeenUpdate_ErrorNotesBook_2026';
+    const updateKey = 'hasSeenUpdate_DigitalLibrary_2026';
     const hasSeen = localStorage.getItem(updateKey);
     
     if (!hasSeen) {
@@ -23,7 +23,7 @@ export default function WhatsNewModal() {
   }, [user]);
 
   const handleClose = () => {
-    localStorage.setItem('hasSeenUpdate_ErrorNotesBook_2026', 'true');
+    localStorage.setItem('hasSeenUpdate_DigitalLibrary_2026', 'true');
     setIsOpen(false);
   };
 
@@ -57,8 +57,8 @@ export default function WhatsNewModal() {
               <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md mb-4 border border-white/30 shadow-sm">
                 <PartyPopper className="w-6 h-6 text-yellow-300" />
               </div>
-              <h2 className="text-2xl font-bold mb-1">New Feature: Error Notes 📕</h2>
-              <p className="text-blue-100 text-sm">Track your mistakes, understand concepts, and revise like a JEE topper.</p>
+              <h2 className="text-2xl font-bold mb-1">New: Digital Library Meet 🎥</h2>
+              <p className="text-blue-100 text-sm">Join live video study rooms, collaborate on the real-time whiteboard, and share your screen.</p>
             </div>
           </div>
 
@@ -67,26 +67,26 @@ export default function WhatsNewModal() {
             
             {/* Feature 1 */}
             <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center shrink-0 text-red-600 dark:text-red-400">
-                <BookOpen className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0 text-blue-600 dark:text-blue-400">
+                <Video className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Error Notes Book</h3>
+                <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Live Video Meet & Screen Share</h3>
                 <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Save mistakes from mock tests and books, attach private problem snapshots, write correct concepts, and mark for revision before your JEE attempt!
+                  Join the study hall instantly with one click. Turn on your camera, mute/unmute mic, and share your screen with fellow aspirants.
                 </p>
               </div>
             </div>
 
             {/* Feature 2 */}
             <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0 text-blue-600 dark:text-blue-400">
-                <Video className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-full bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center shrink-0 text-purple-600 dark:text-purple-400">
+                <Palette className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Study Groups & Video Meets</h3>
+                <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Real-Time Collaborative Whiteboard</h3>
                 <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Join study rooms, collaborate with peers, start instant video calls, and sketch doubts on the Live Whiteboard.
+                  Draw and solve JEE problems together! All strokes are synced in real time across everyone in the study room.
                 </p>
               </div>
             </div>
@@ -97,9 +97,9 @@ export default function WhatsNewModal() {
                 <Sparkles className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Fast & Reliable Uploads</h3>
+                <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Pomodoro & Lo-Fi Focus Music</h3>
                 <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Optimized image uploads for posts, notes, and error books with instant fallbacks so nothing ever fails.
+                  Stay super productive with built-in 25-minute Pomodoro study timers and calming ambient focus beats.
                 </p>
               </div>
             </div>
@@ -112,7 +112,7 @@ export default function WhatsNewModal() {
               onClick={handleClose}
               className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-sm transition-colors active:scale-[0.98]"
             >
-              Start Using Error Notes 🚀
+              Explore Digital Library 🚀
             </button>
           </div>
 

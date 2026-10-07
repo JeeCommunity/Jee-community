@@ -85,7 +85,7 @@ Sabhi notes verified aur completely free hain. Neeche diye button par click kare
 
 export default function AdminDashboard() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'posts' | 'users' | 'reports' | 'feedback' | 'beats' | 'groups' | 'broadcast'>('posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'users' | 'reports' | 'feedback' | 'beats' | 'groups' | 'broadcast' | 'github'>('posts');
   const [broadcastSubject, setBroadcastSubject] = useState(BROADCAST_TEMPLATES[0].subject);
   const [broadcastMessage, setBroadcastMessage] = useState(BROADCAST_TEMPLATES[0].message);
   const [broadcastActionUrl, setBroadcastActionUrl] = useState(BROADCAST_TEMPLATES[0].actionUrl);
@@ -867,6 +867,14 @@ export default function AdminDashboard() {
         >
           <Mail className="w-4 h-4 mr-1.5" /> Broadcast Emails
         </button>
+        <button
+          onClick={() => setActiveTab('github')}
+          className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors flex items-center whitespace-nowrap ${
+            activeTab === 'github' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white dark:text-white'
+          }`}
+        >
+          <svg className="w-4 h-4 mr-1.5 fill-current inline" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02_0_0024 12c0-6.63-5.37-12-12-12z"/></svg> GitHub & Deploy
+        </button>
       </div>
 
       {/* Content */}
@@ -1522,6 +1530,40 @@ export default function AdminDashboard() {
 
               <div className="flex items-center justify-between text-xs text-slate-400 dark:text-slate-500 px-1 pt-1">
                 <span>⚡ Agar server connection fail ho, toh upar 'Open in Gmail App' use karein.</span>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'github' ? (
+          <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-6">
+            <div className="flex items-center space-x-3 pb-6 border-b border-slate-200 dark:border-slate-800">
+              <div className="p-3 bg-slate-900 text-white rounded-2xl shadow-md">
+                <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02_0_0024 12c0-6.63-5.37-12-12-12z"/></svg>
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white">GitHub Repository & Deployment Setup</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Configure and connect your app repository with GitHub and Netlify/Render.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-sm text-slate-700 dark:text-slate-300">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
+                <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>📂 Current Repository:</span>
+                  <code className="text-blue-600 dark:text-blue-400 font-mono text-xs bg-blue-50 dark:bg-blue-950/50 px-2 py-1 rounded">JeeCommunity/Jee-community</code>
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Your project is fully synchronized with GitHub and deployed automatically on Render and Netlify on every push or build.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 space-y-3">
+                <h4 className="font-bold text-blue-900 dark:text-blue-200">⚡ How to Connect & Sync with GitHub from AI Studio:</h4>
+                <ol className="list-decimal list-inside space-y-2 text-xs md:text-sm text-slate-600 dark:text-slate-300">
+                  <li>Click the <strong>Publish</strong> or <strong>Share</strong> button in the top right header of AI Studio.</li>
+                  <li>Select <strong>Export to GitHub</strong> or connect your GitHub account.</li>
+                  <li>Authorize AI Studio to create or update your repository (e.g., <code className="font-mono text-xs bg-white dark:bg-slate-900 px-1 py-0.5 rounded">JeeCommunity/Jee-community</code>).</li>
+                  <li>Link your GitHub repository to Netlify or Render for continuous auto-deployments on every update!</li>
+                </ol>
               </div>
             </div>
           </div>

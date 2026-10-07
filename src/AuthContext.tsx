@@ -48,8 +48,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       const docRef = doc(db, 'users', currentUser.uid);
       try {
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
+        let docSnap;
+        try {
+          docSnap = await getDoc(docRef);
+        } catch (networkErr: any) {
+          try {
+            docSnap = await getDocFromCache(docRef);
+          } catch (cacheErr) {
+            throw networkErr;
+          }
+        }
+        if (docSnap && docSnap.exists()) {
           const data = docSnap.data() as UserProfile;
           
           // Streak Logic

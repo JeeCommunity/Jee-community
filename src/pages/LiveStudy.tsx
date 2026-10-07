@@ -362,6 +362,21 @@ export default function LiveStudy() {
 
   const pipTimerRef = React.useRef<any>(null);
 
+  useEffect(() => {
+    return () => {
+      if (pipWindow) {
+        try { pipWindow.close(); } catch (e) {}
+      }
+      if (pipTimerRef.current) {
+        clearInterval(pipTimerRef.current);
+        pipTimerRef.current = null;
+      }
+      if (document.pictureInPictureElement) {
+        try { document.exitPictureInPicture(); } catch (e) {}
+      }
+    };
+  }, [pipWindow]);
+
   const updateCanvasTimer = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;

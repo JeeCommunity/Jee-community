@@ -19,6 +19,7 @@ import { PrivacyPolicy, TermsOfService, Disclaimer } from './pages/Legal';
 import { About } from './pages/About';
 import ErrorNotes from './pages/ErrorNotes';
 import Whiteboard from './pages/Whiteboard';
+import DigitalLibrary from './pages/DigitalLibrary';
 
 export default function App() {
   if (!isFirebaseConfigured()) {
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="setup-profile" element={<ProfileSetup />} />
             <Route path="community" element={<Community />} />
             <Route path="study-room" element={<LiveStudy />} />
+            <Route path="digital-library" element={<DigitalLibrary />} />
             <Route path="campus" element={<Campus />} />
             <Route path="calculator" element={<Calculator />} />
             <Route path="notes" element={<NotesHub />} />
