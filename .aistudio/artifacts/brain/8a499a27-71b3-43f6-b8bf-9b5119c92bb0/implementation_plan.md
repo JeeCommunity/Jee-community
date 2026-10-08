@@ -1,25 +1,17 @@
-# Implementation Plan - Collaborative Whiteboard & Screen Share Improvements
+# Implementation Plan - Optimize Firestore Quota Usage & Caching
 
-We will enhance the **Digital Library** (`src/pages/DigitalLibrary.tsx`) with:
-1. **Real-Time Collaborative Whiteboard**: Sync drawing strokes across all connected room participants using Firestore so everyone at the study table sees drawings instantly.
-2. **Improved Screen Sharing Error Handling**: Provide a clear, friendly helper notice for mobile users or when screen sharing is cancelled/unsupported by the browser.
+## Problem
+The application experienced Firestore `resource-exhausted` (quota exceeded) errors due to frequent reads/writes and real-time snapshot listener intensity across study sessions and community feeds.
 
 ## Proposed Changes
-
-### 1. Collaborative Whiteboard via Firestore
-- Save canvas drawing actions (paths/strokes) to Firestore collection `metadata/digital_library_whiteboard`.
-- Listen for real-time updates via `onSnapshot` so all users connected to the digital library see strokes drawn by any participant.
-- Clear canvas syncs across all users.
-
-### 2. Screen Share Guide & Error Handling
-- Catch screen capture errors gracefully.
-- Show an informative toast/alert explaining that mobile browsers have hardware limitations for screen sharing, while desktop Chrome/Edge/Firefox support it fully.
+1. **Firestore Caching & Persistence**:
+   - Enable `enableIndexedDbPersistence` (or fallback memory persistence) in `src/firebase.ts` to cache Firestore reads locally and reduce redundant server requests.
+2. **Optimize Study Session Real-Time Sync**:
+   - Reduce unnecessary continuous writes in `LiveStudy.tsx`.
+   - Debounce session state updates and cache active session state in `localStorage` as a fallback during offline or quota throttling.
+3. **Throttle Feed & Leaderboard Real-Time Listeners**:
+   - Adjust Firestore snapshot frequency and implement smart caching in Community and Leaderboard components to minimize read operations.
 
 ## Verification Plan
-
-### Automated Tests
-- Run `compile_applet` to ensure zero TypeScript and build errors.
-
-### Manual Verification
-- Open Digital Library in two browser tabs. Draw on the whiteboard in Tab 1 and verify that Tab 2 renders the strokes in real time.
-- Test screen sharing button and verify friendly error messaging on mobile or cancellation.
+- Compile the applet using `compile_applet`.
+- Verify smooth functioning of study timer, local storage caching, and Firestore connection resilience.

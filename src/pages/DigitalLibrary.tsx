@@ -5,7 +5,7 @@ import { doc, setDoc, getDoc, collection, onSnapshot, serverTimestamp, deleteDoc
 import { 
   Video, VideoOff, Mic, MicOff, Monitor, MonitorOff, 
   BookOpen, Users, Clock, Play, Pause, RotateCcw, 
-  Volume2, VolumeX, Sparkles, Pencil, Eraser, Trash2, Shield, Radio, CheckCircle, MessageSquare, LogOut, PhoneCall
+  Volume2, VolumeX, Sparkles, Pencil, Eraser, Trash2, Shield, Radio, CheckCircle, MessageSquare, LogOut, PhoneCall, Maximize2, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -13,15 +13,29 @@ export default function DigitalLibrary() {
   const { user, profile } = useAuth();
   const [isInRoom, setIsInRoom] = useState(false);
   const [participants, setParticipants] = useState<any[]>([]);
+  const [whiteboards, setWhiteboards] = useState<Record<string, { strokes: any[]; isWhiteboardActive: boolean }>>({});
   
   // Media states
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isMicOn, setIsMicOn] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'video' | 'whiteboard' | 'pomodoro'>('video');
+  const [activeTab, setActiveTab] = useState<'video' | 'pomodoro'>('video');
+
+  // Spotlight view state
+  const [spotlightParticipant, setSpotlightParticipant] = useState<any | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+
+  // My Whiteboard states (Professional 1200x675 HD resolution for smooth teacher-like writing)
+  const [isMyWhiteboardActive, setIsMyWhiteboardActive] = useState(false);
+  const myCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [brushColor, setBrushColor] = useState('#2563eb');
+  const [brushSize, setBrushSize] = useState(3);
+  const [tool, setTool] = useState<'pen' | 'eraser'>('pen');
+  const myStrokesRef = useRef<any[]>([]);
+  const lastPosRef = useRef<{ x: number; y: number } | null>(null);
 
   // Pomodoro states
   const [pomodoroMinutes, setPomodoroMinutes] = useState(25);
@@ -33,18 +47,11 @@ export default function DigitalLibrary() {
   const [isPlayingMusic, setIsPlayingMusic] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Whiteboard states
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [brushColor, setBrushColor] = useState('#2563eb');
-  const [brushSize, setBrushSize] = useState(3);
-  const [tool, setTool] = useState<'pen' | 'eraser'>('pen');
-  const strokesRef = useRef<any[]>([]);
-
-  // Sync presence in Firestore when in room using metadata collection
+  // Sync presence in Firestore once when joining/leaving or changing media state (NO continuous heartbeat interval)
   useEffect(() => {
     if (!user || !profile || !isInRoom) return;
     const roomRef = doc(db, 'metadata', 'digital_library_participants_' + user.uid);
+    const wbRef = doc(db, 'metadata', 'digital_library_wb_' + user.uid);
 
     const updatePresence = async () => {
       try {
@@ -56,6 +63,7 @@ export default function DigitalLibrary() {
           isCameraOn,
           isMicOn,
           isScreenSharing,
+          isWhiteboardActive: isMyWhiteboardActive,
           lastActive: serverTimestamp()
         }, { merge: true });
       } catch (e) {
@@ -65,83 +73,98 @@ export default function DigitalLibrary() {
 
     updatePresence();
 
-    const heartbeat = setInterval(updatePresence, 10000);
+    const metadataRef = collection(db, 'metadata');
+    const unsubscribe = onSnapshot(metadataRef, (snapshot) => {
+      const partList: any[] = [];
+      const wbMap: Record<string, { strokes: any[]; isWhiteboardActive: boolean }> = {};
 
-    const participantsRef = collection(db, 'metadata');
-    const unsubscribe = onSnapshot(participantsRef, (snapshot) => {
-      const list: any[] = [];
       snapshot.forEach(docSnap => {
-        if (docSnap.id.startsWith('digital_library_participants_')) {
-          list.push({ id: docSnap.id, ...docSnap.data() });
+        const id = docSnap.id;
+        const data = docSnap.data();
+        if (id.startsWith('digital_library_participants_')) {
+          partList.push({ id, ...data });
+        } else if (id.startsWith('digital_library_wb_')) {
+          const uid = id.replace('digital_library_wb_', '');
+          wbMap[uid] = {
+            strokes: data.strokes || [],
+            isWhiteboardActive: !!data.isWhiteboardActive
+          };
         }
       });
-      setParticipants(list);
+      setParticipants(partList);
+      setWhiteboards(wbMap);
     });
 
     return () => {
-      clearInterval(heartbeat);
       unsubscribe();
       deleteDoc(roomRef).catch(() => {});
+      deleteDoc(wbRef).catch(() => {});
     };
-  }, [user, isInRoom, isCameraOn, isMicOn, isScreenSharing]);
+  }, [user, isInRoom, isCameraOn, isMicOn, isScreenSharing, isMyWhiteboardActive]);
 
-  // Real-time Collaborative Whiteboard Sync via Firestore
-  useEffect(() => {
-    if (!isInRoom) return;
-    const wbRef = doc(db, 'metadata', 'digital_library_shared_whiteboard');
-
-    const unsubscribe = onSnapshot(wbRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data && Array.isArray(data.strokes)) {
-          strokesRef.current = data.strokes;
-          redrawCanvas(data.strokes);
-        }
-      }
-    });
-
-    return () => unsubscribe();
-  }, [isInRoom]);
-
-  const redrawCanvas = (strokes: any[]) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    strokes.forEach(s => {
-      ctx.lineWidth = s.size;
-      ctx.lineCap = 'round';
-      ctx.strokeStyle = s.color;
-      ctx.beginPath();
-      ctx.moveTo(s.x0, s.y0);
-      ctx.lineTo(s.x1, s.y1);
-      ctx.stroke();
-    });
+  // Keep whiteboard strokes locally in memory without high-frequency Firestore writes per stroke
+  const publishMyStroke = (stroke: { x0: number; y0: number; x1: number; y1: number; color: string; size: number }) => {
+    myStrokesRef.current = [...myStrokesRef.current, stroke].slice(-500);
   };
 
-  const publishStroke = async (stroke: { x0: number; y0: number; x1: number; y1: number; color: string; size: number }) => {
+  const clearMyWhiteboard = async () => {
+    if (!user) return;
     try {
-      const wbRef = doc(db, 'metadata', 'digital_library_shared_whiteboard');
-      const updatedStrokes = [...strokesRef.current, stroke].slice(-500); // keep last 500 strokes
-      await setDoc(wbRef, { strokes: updatedStrokes, lastUpdated: serverTimestamp() }, { merge: true });
-    } catch (e) {
-      console.error("Error syncing stroke:", e);
-    }
-  };
-
-  const clearCanvasRemote = async () => {
-    try {
-      const wbRef = doc(db, 'metadata', 'digital_library_shared_whiteboard');
-      await setDoc(wbRef, { strokes: [], lastUpdated: serverTimestamp() }, { merge: true });
-      toast.success("Whiteboard cleared for everyone");
+      myStrokesRef.current = [];
+      const wbRef = doc(db, 'metadata', 'digital_library_wb_' + user.uid);
+      await setDoc(wbRef, {
+        strokes: [],
+        isWhiteboardActive: isMyWhiteboardActive,
+        lastUpdated: serverTimestamp()
+      }, { merge: true });
+      toast.success("Your whiteboard was cleared");
     } catch (e) {
       toast.error("Failed to clear whiteboard");
     }
   };
+
+  const toggleMyWhiteboard = async () => {
+    const newState = !isMyWhiteboardActive;
+    setIsMyWhiteboardActive(newState);
+    if (user) {
+      const wbRef = doc(db, 'metadata', 'digital_library_wb_' + user.uid);
+      await setDoc(wbRef, {
+        isWhiteboardActive: newState,
+        strokes: newState ? myStrokesRef.current : [],
+        lastUpdated: serverTimestamp()
+      }, { merge: true });
+    }
+    toast.success(newState ? "Your whiteboard is now OPEN on your tile ✏️" : "Your whiteboard is closed");
+  };
+
+  // Render remote or local whiteboards on HD 1200x675 canvas elements
+  useEffect(() => {
+    if (!isInRoom) return;
+    Object.keys(whiteboards).forEach(uid => {
+      const wbData = whiteboards[uid];
+      const canvasEl = document.getElementById(`wb-canvas-${uid}`) as HTMLCanvasElement;
+      if (canvasEl) {
+        if (!canvasEl.width || canvasEl.width !== 1200) {
+          canvasEl.width = 1200;
+          canvasEl.height = 675;
+        }
+        const ctx = canvasEl.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+          (wbData.strokes || []).forEach(s => {
+            ctx.lineWidth = s.size;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = s.color;
+            ctx.beginPath();
+            ctx.moveTo(s.x0, s.y0);
+            ctx.lineTo(s.x1, s.y1);
+            ctx.stroke();
+          });
+        }
+      }
+    });
+  }, [whiteboards, isInRoom]);
 
   // Handle join/leave room
   const handleJoinMeet = async () => {
@@ -161,7 +184,7 @@ export default function DigitalLibrary() {
       toast.success("Camera & Microphone connected successfully!");
     } catch (e) {
       console.log("Permission notice:", e);
-      toast("You can turn on your camera and mic anytime using the button inside the video box.", { icon: '💡' });
+      toast("You can turn on your camera and mic anytime using the controls.", { icon: '💡' });
     }
   };
 
@@ -171,12 +194,16 @@ export default function DigitalLibrary() {
     }
     if (user) {
       const roomRef = doc(db, 'metadata', 'digital_library_participants_' + user.uid);
+      const wbRef = doc(db, 'metadata', 'digital_library_wb_' + user.uid);
       deleteDoc(roomRef).catch(() => {});
+      deleteDoc(wbRef).catch(() => {});
     }
     setIsInRoom(false);
     setIsCameraOn(false);
     setIsMicOn(false);
     setIsScreenSharing(false);
+    setIsMyWhiteboardActive(false);
+    setSpotlightParticipant(null);
     toast.success("Left the meet");
   };
 
@@ -216,14 +243,14 @@ export default function DigitalLibrary() {
     try {
       if (!isScreenSharing) {
         if (!navigator.mediaDevices || !(navigator.mediaDevices as any).getDisplayMedia) {
-          toast.error("Screen sharing is not supported on this browser or mobile device. Please use Desktop Chrome/Edge/Firefox.");
+          toast.error("Screen sharing requires Desktop Chrome, Edge, or Firefox.");
           return;
         }
-        const stream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true });
+        const stream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: true });
         localStreamRef.current = stream;
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
         setIsScreenSharing(true);
-        toast.success("Screen sharing started");
+        toast.success("Screen sharing started successfully!");
         stream.getVideoTracks()[0].onended = () => {
           setIsScreenSharing(false);
           toast.success("Screen sharing stopped");
@@ -233,12 +260,13 @@ export default function DigitalLibrary() {
           localStreamRef.current.getTracks().forEach(t => t.stop());
         }
         setIsScreenSharing(false);
+        toast.success("Screen sharing stopped");
       }
     } catch (e: any) {
       if (e?.name === 'NotAllowedError' || e?.message?.includes('Permission denied')) {
-        toast.error("Screen sharing was cancelled or permission denied.");
+        toast("Screen sharing permission was cancelled.", { icon: 'ℹ️' });
       } else {
-        toast.error("Screen sharing is not supported or cancelled on this device/browser.");
+        toast.error("Screen sharing failed. Please ensure you are using Desktop Chrome/Firefox/Edge on HTTPS.");
       }
     }
   };
@@ -289,26 +317,21 @@ export default function DigitalLibrary() {
     }
   };
 
-  // Whiteboard drawing functions
-  useEffect(() => {
-    if (activeTab === 'whiteboard' && canvasRef.current) {
-      const canvas = canvasRef.current;
-      canvas.width = canvas.parentElement?.clientWidth || 800;
-      canvas.height = 500;
-      redrawCanvas(strokesRef.current);
-    }
-  }, [activeTab]);
-
-  const lastPosRef = useRef<{ x: number; y: number } | null>(null);
-
+  // High-Resolution Professional Drawing Handlers with Precise Scaling
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     setIsDrawing(true);
-    const canvas = canvasRef.current;
+    const canvas = myCanvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
-    lastPosRef.current = { x: clientX - rect.left, y: clientY - rect.top };
+    lastPosRef.current = { 
+      x: (clientX - rect.left) * scaleX, 
+      y: (clientY - rect.top) * scaleY 
+    };
   };
 
   const stopDrawing = () => {
@@ -317,13 +340,19 @@ export default function DigitalLibrary() {
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !canvasRef.current || !lastPosRef.current) return;
-    const canvas = canvasRef.current;
+    if (!isDrawing || !myCanvasRef.current || !lastPosRef.current) return;
+    const canvas = myCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
     const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
 
     const stroke = {
       x0: lastPosRef.current.x,
@@ -334,9 +363,42 @@ export default function DigitalLibrary() {
       size: tool === 'eraser' ? brushSize * 4 : brushSize
     };
 
+    // Draw locally immediately on HD control panel canvas
+    ctx.lineWidth = stroke.size;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = stroke.color;
+    ctx.beginPath();
+    ctx.moveTo(stroke.x0, stroke.y0);
+    ctx.lineTo(stroke.x1, stroke.y1);
+    ctx.stroke();
+
     lastPosRef.current = { x, y };
-    publishStroke(stroke);
+    publishMyStroke(stroke);
   };
+
+  useEffect(() => {
+    if (isMyWhiteboardActive && myCanvasRef.current) {
+      const canvas = myCanvasRef.current;
+      if (!canvas.width) {
+        canvas.width = 1200;
+        canvas.height = 675;
+      }
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        myStrokesRef.current.forEach(s => {
+          ctx.lineWidth = s.size;
+          ctx.lineCap = 'round';
+          ctx.strokeStyle = s.color;
+          ctx.beginPath();
+          ctx.moveTo(s.x0, s.y0);
+          ctx.lineTo(s.x1, s.y1);
+          ctx.stroke();
+        });
+      }
+    }
+  }, [isMyWhiteboardActive]);
 
   // If not yet joined, show the landing card with the big "Join Meet" button
   if (!isInRoom) {
@@ -355,7 +417,7 @@ export default function DigitalLibrary() {
               Digital Library Live Meet
             </h1>
             <p className="text-indigo-100 text-lg">
-              Connect with fellow JEE aspirants in real-time. Share your camera, collaborate on the shared whiteboard with live sync, share your screen, and study together.
+              Connect with fellow JEE aspirants in real-time. Share your camera, open your independent personal whiteboard on your video tile, and study together.
             </p>
             <div className="pt-4">
               <button
@@ -409,17 +471,6 @@ export default function DigitalLibrary() {
               <span>Video & Participants ({participants.length})</span>
             </button>
             <button
-              onClick={() => setActiveTab('whiteboard')}
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors flex items-center space-x-2 ${
-                activeTab === 'whiteboard'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
-            >
-              <Pencil className="w-4 h-4" />
-              <span>Shared Whiteboard (Live Sync)</span>
-            </button>
-            <button
               onClick={() => setActiveTab('pomodoro')}
               className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors flex items-center space-x-2 ${
                 activeTab === 'pomodoro'
@@ -433,201 +484,305 @@ export default function DigitalLibrary() {
           </div>
         </div>
 
-        {/* Tab 1: Video & Participants */}
+        {/* Tab 1: Video & Independent Whiteboard Grid with Spotlight View */}
         {activeTab === 'video' && (
-          <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 space-y-6">
-              <div className="aspect-video bg-slate-950 rounded-2xl overflow-hidden relative shadow-inner flex items-center justify-center border border-slate-800">
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={`w-full h-full object-cover ${isCameraOn || isScreenSharing ? 'block' : 'hidden'}`}
-                />
-                {!isCameraOn && !isScreenSharing && (
-                  <div className="text-center p-6 text-slate-400 space-y-4">
-                    <div className="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center mx-auto border border-slate-800 text-blue-500 shadow-md">
-                      <VideoOff className="w-8 h-8" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-white mb-1">Camera & Mic are Off</h3>
-                      <p className="text-xs text-slate-400 max-w-xs mx-auto mb-3">
-                        Click below to allow browser permissions and start video.
-                      </p>
-                      <button
-                        onClick={toggleCamera}
-                        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
-                      >
-                        Allow Camera & Mic
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-white text-xs font-semibold flex items-center space-x-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                  <span>{profile?.fullName || user?.email || 'You'} (You)</span>
-                </div>
-              </div>
-
-              {/* Media Controls */}
-              <div className="flex items-center justify-center space-x-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
-                <button
-                  onClick={toggleCamera}
-                  className={`p-4 rounded-2xl transition-all shadow-sm flex items-center space-x-2 ${
-                    isCameraOn 
-                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
-                  }`}
-                  title={isCameraOn ? "Turn Camera Off" : "Turn Camera On"}
-                >
-                  {isCameraOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
-                  <span className="text-sm font-semibold hidden sm:inline">{isCameraOn ? 'Cam On' : 'Cam Off'}</span>
-                </button>
-
-                <button
-                  onClick={toggleMic}
-                  className={`p-4 rounded-2xl transition-all shadow-sm flex items-center space-x-2 ${
-                    isMicOn 
-                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
-                  }`}
-                  title={isMicOn ? "Mute Mic" : "Unmute Mic"}
-                >
-                  {isMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-                  <span className="text-sm font-semibold hidden sm:inline">{isMicOn ? 'Mic On' : 'Muted'}</span>
-                </button>
-
-                <button
-                  onClick={toggleScreenShare}
-                  className={`p-4 rounded-2xl transition-all shadow-sm flex items-center space-x-2 ${
-                    isScreenSharing 
-                      ? 'bg-emerald-600 text-white hover:bg-emerald-700' 
-                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
-                  }`}
-                  title={isScreenSharing ? "Stop Sharing" : "Share Screen"}
-                >
-                  {isScreenSharing ? <Monitor className="w-5 h-5" /> : <MonitorOff className="w-5 h-5" />}
-                  <span className="text-sm font-semibold hidden sm:inline">{isScreenSharing ? 'Sharing' : 'Share Screen'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Participants Sidebar */}
-            <div className="space-y-4">
+          <div className="p-6 space-y-6">
+            <div className="flex items-center justify-between">
               <h3 className="font-bold text-slate-900 dark:text-white flex items-center space-x-2">
                 <Users className="w-5 h-5 text-blue-500" />
-                <span>Joined Participants ({participants.length})</span>
+                <span>Live Group Meet Grid ({participants.length} Aspirants Online) - Tap any tile to Spotlight 🔍</span>
               </h3>
-
-              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
-                {participants.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold overflow-hidden border border-blue-400">
-                        {p.photoURL ? (
-                          <img src={p.photoURL} alt={p.fullName} className="w-full h-full object-cover" />
-                        ) : (
-                          <span>{(p.fullName || 'S')[0]}</span>
-                        )}
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-900 dark:text-white">{p.fullName}</h4>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">@{p.username || 'aspirant'}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-1.5">
-                      {p.isCameraOn && <span className="w-2 h-2 rounded-full bg-emerald-500" title="Camera On"></span>}
-                      {p.isMicOn && <span className="w-2 h-2 rounded-full bg-blue-500" title="Mic On"></span>}
-                      {p.isScreenSharing && <span className="px-2 py-0.5 rounded text-[10px] bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 font-semibold">Screen</span>}
-                    </div>
-                  </div>
-                ))}
-                {participants.length === 0 && (
-                  <div className="text-center py-8 text-slate-400 text-sm">
-                    No active aspirants in the meet currently.
-                  </div>
-                )}
-              </div>
             </div>
-          </div>
-        )}
 
-        {/* Tab 2: Shared Whiteboard (Live Sync) */}
-        {activeTab === 'whiteboard' && (
-          <div className="p-6 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
-              <div className="flex items-center space-x-3">
-                <button
-                  onClick={() => setTool('pen')}
-                  className={`p-2.5 rounded-xl transition-all ${tool === 'pen' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700'}`}
-                  title="Pen Tool"
-                >
-                  <Pencil className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => setTool('eraser')}
-                  className={`p-2.5 rounded-xl transition-all ${tool === 'eraser' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700'}`}
-                  title="Eraser"
-                >
-                  <Eraser className="w-5 h-5" />
-                </button>
+            {/* Grid of participant tiles with independent whiteboards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {participants.map((p) => {
+                const isMe = p.uid === user?.uid || p.id === 'digital_library_participants_' + user?.uid;
+                const uid = isMe ? user?.uid : p.uid;
+                const wbData = uid ? whiteboards[uid] : null;
+                const showWhiteboard = wbData?.isWhiteboardActive;
 
-                <div className="h-6 w-px bg-slate-300 dark:bg-slate-700 mx-1"></div>
+                return (
+                  <div 
+                    key={p.id} 
+                    onClick={() => setSpotlightParticipant(p)}
+                    className="aspect-video bg-slate-950 rounded-2xl overflow-hidden relative shadow-md flex items-center justify-center border border-slate-800 cursor-pointer hover:border-blue-500 transition-all group"
+                    title="Tap to view in Spotlight / Fullscreen"
+                  >
+                    {/* If this participant has their whiteboard active */}
+                    {showWhiteboard ? (
+                      <div className="w-full h-full bg-white relative flex flex-col">
+                        <canvas
+                          id={`wb-canvas-${uid}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute top-2 left-2 bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow">
+                          ✏️ Whiteboard Active
+                        </div>
+                      </div>
+                    ) : isMe && (isCameraOn || isScreenSharing) ? (
+                      <video
+                        ref={localVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                      />
+                    ) : p.isCameraOn || p.isScreenSharing ? (
+                      <div className="w-full h-full bg-slate-900 flex flex-col items-center justify-center text-white p-4">
+                        <div className="w-16 h-16 rounded-full bg-blue-600 flex items-center justify-center text-xl font-bold mb-2 shadow-inner border border-blue-400">
+                          {p.photoURL ? (
+                            <img src={p.photoURL} alt={p.fullName} className="w-full h-full object-cover rounded-full" />
+                          ) : (
+                            <span>{(p.fullName || 'S')[0]}</span>
+                          )}
+                        </div>
+                        <span className="text-xs text-emerald-400 font-semibold animate-pulse">● Camera Active</span>
+                      </div>
+                    ) : (
+                      <div className="w-full h-full bg-slate-900/90 flex flex-col items-center justify-center text-white p-4">
+                        <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-xl font-bold mb-2 shadow-inner border border-slate-700 text-slate-300">
+                          {p.photoURL ? (
+                            <img src={p.photoURL} alt={p.fullName} className="w-full h-full object-cover rounded-full" />
+                          ) : (
+                            <span>{(p.fullName || 'S')[0]}</span>
+                          )}
+                        </div>
+                        <span className="text-xs text-slate-400">Camera Off</span>
+                      </div>
+                    )}
 
-                <div className="flex items-center space-x-2">
-                  {['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#000000'].map(c => (
+                    {/* Expand icon on hover */}
+                    <div className="absolute top-2 right-2 bg-black/60 text-white p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Maximize2 className="w-4 h-4" />
+                    </div>
+
+                    {/* Name & status badge */}
+                    <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between bg-black/65 backdrop-blur-md px-3 py-1.5 rounded-xl text-white text-xs font-semibold z-10">
+                      <span className="truncate max-w-[120px]">
+                        {p.fullName} {isMe && '(You)'}
+                      </span>
+                      <div className="flex items-center space-x-1.5">
+                        <span className={`w-2 h-2 rounded-full ${p.isMicOn ? 'bg-blue-500' : 'bg-red-500'}`} title={p.isMicOn ? "Mic On" : "Muted"}></span>
+                        <span className={`w-2 h-2 rounded-full ${p.isCameraOn ? 'bg-emerald-500' : 'bg-slate-500'}`} title={p.isCameraOn ? "Camera On" : "Camera Off"}></span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Spotlight Fullscreen Modal */}
+            {spotlightParticipant && (() => {
+              const p = spotlightParticipant;
+              const isMe = p.uid === user?.uid || p.id === 'digital_library_participants_' + user?.uid;
+              const uid = isMe ? user?.uid : p.uid;
+              const wbData = uid ? whiteboards[uid] : null;
+              const showWhiteboard = wbData?.isWhiteboardActive;
+
+              return (
+                <div className="fixed inset-0 bg-black/80 z-[110] flex items-center justify-center p-4 backdrop-blur-md">
+                  <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
+                    <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950 text-white">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center font-bold overflow-hidden">
+                          {p.photoURL ? <img src={p.photoURL} alt={p.fullName} className="w-full h-full object-cover" /> : <span>{(p.fullName || 'S')[0]}</span>}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-lg">{p.fullName} {isMe && '(You)'} - Spotlight View</h3>
+                          <p className="text-xs text-slate-400">@{p.username || 'aspirant'}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setSpotlightParticipant(null)}
+                        className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors"
+                      >
+                        <X className="w-6 h-6" />
+                      </button>
+                    </div>
+
+                    <div className="p-6 flex-1 flex items-center justify-center bg-black overflow-hidden">
+                      {showWhiteboard ? (
+                        <div className="w-full h-[65vh] bg-white rounded-2xl overflow-hidden relative flex flex-col">
+                          <canvas
+                            id={`wb-canvas-spotlight-${uid}`}
+                            ref={(el) => {
+                              if (el && wbData?.strokes) {
+                                el.width = 1200;
+                                el.height = 675;
+                                const ctx = el.getContext('2d');
+                                if (ctx) {
+                                  ctx.fillStyle = '#ffffff';
+                                  ctx.fillRect(0, 0, el.width, el.height);
+                                  wbData.strokes.forEach((s: any) => {
+                                    ctx.lineWidth = s.size;
+                                    ctx.lineCap = 'round';
+                                    ctx.strokeStyle = s.color;
+                                    ctx.beginPath();
+                                    ctx.moveTo(s.x0, s.y0);
+                                    ctx.lineTo(s.x1, s.y1);
+                                    ctx.stroke();
+                                  });
+                                }
+                              }
+                            }}
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                      ) : isMe && (isCameraOn || isScreenSharing) ? (
+                        <video
+                          ref={(el) => {
+                            if (el && localVideoRef.current?.srcObject) {
+                              el.srcObject = localVideoRef.current.srcObject;
+                            }
+                          }}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="w-full h-[65vh] object-contain rounded-2xl"
+                        />
+                      ) : (
+                        <div className="text-center py-20 text-slate-400 space-y-4">
+                          <div className="w-24 h-24 rounded-full bg-slate-800 flex items-center justify-center text-3xl font-bold mx-auto border border-slate-700 text-slate-200">
+                            {p.photoURL ? <img src={p.photoURL} alt={p.fullName} className="w-full h-full object-cover rounded-full" /> : <span>{(p.fullName || 'S')[0]}</span>}
+                          </div>
+                          <h4 className="text-xl font-bold text-white">{p.fullName}'s Camera is Off</h4>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* My Whiteboard Drawing Canvas Section if Open */}
+            {isMyWhiteboardActive && (
+              <div className="bg-slate-50 dark:bg-slate-800/80 p-6 rounded-3xl border border-blue-500 shadow-xl space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center space-x-3">
+                    <span className="font-bold text-slate-900 dark:text-white text-sm">Professional HD Whiteboard Controls:</span>
                     <button
-                      key={c}
-                      onClick={() => { setBrushColor(c); setTool('pen'); }}
-                      className={`w-7 h-7 rounded-full border-2 transition-transform ${brushColor === c && tool === 'pen' ? 'scale-110 border-white shadow-md' : 'border-transparent'}`}
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
+                      onClick={() => setTool('pen')}
+                      className={`p-2 rounded-xl transition-all ${tool === 'pen' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700'}`}
+                      title="Pen Tool"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setTool('eraser')}
+                      className={`p-2 rounded-xl transition-all ${tool === 'eraser' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700'}`}
+                      title="Eraser"
+                    >
+                      <Eraser className="w-4 h-4" />
+                    </button>
+
+                    <div className="flex items-center space-x-1.5 ml-2">
+                      {['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#000000'].map(c => (
+                        <button
+                          key={c}
+                          onClick={() => { setBrushColor(c); setTool('pen'); }}
+                          className={`w-6 h-6 rounded-full border-2 transition-transform ${brushColor === c && tool === 'pen' ? 'scale-110 border-white shadow' : 'border-transparent'}`}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+
+                    <select
+                      value={brushSize}
+                      onChange={(e) => setBrushSize(Number(e.target.value))}
+                      className="px-2.5 py-1 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200"
+                    >
+                      <option value={2}>Fine</option>
+                      <option value={4}>Medium</option>
+                      <option value={8}>Bold</option>
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={clearMyWhiteboard}
+                    className="px-4 py-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 font-semibold text-xs flex items-center space-x-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Clear My Board</span>
+                  </button>
                 </div>
 
-                <div className="h-6 w-px bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-                <select
-                  value={brushSize}
-                  onChange={(e) => setBrushSize(Number(e.target.value))}
-                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-700 dark:text-slate-200"
-                >
-                  <option value={2}>Fine (2px)</option>
-                  <option value={4}>Medium (4px)</option>
-                  <option value={8}>Bold (8px)</option>
-                </select>
+                <div className="border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-inner bg-white cursor-crosshair">
+                  <canvas
+                    ref={myCanvasRef}
+                    width={1200}
+                    height={675}
+                    onMouseDown={startDrawing}
+                    onMouseUp={stopDrawing}
+                    onMouseMove={draw}
+                    onMouseLeave={stopDrawing}
+                    onTouchStart={startDrawing}
+                    onTouchEnd={stopDrawing}
+                    onTouchMove={draw}
+                    className="w-full h-[380px] object-contain touch-none bg-white"
+                  />
+                </div>
               </div>
+            )}
+
+            {/* Media & Whiteboard Controls Bar */}
+            <div className="flex items-center justify-center space-x-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 max-w-2xl mx-auto flex-wrap gap-3">
+              <button
+                onClick={toggleCamera}
+                className={`p-3.5 rounded-2xl transition-all shadow-sm flex items-center space-x-2 ${
+                  isCameraOn 
+                    ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+                }`}
+                title={isCameraOn ? "Turn Camera Off" : "Turn Camera On"}
+              >
+                {isCameraOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
+                <span className="text-sm font-semibold hidden sm:inline">{isCameraOn ? 'Cam On' : 'Cam Off'}</span>
+              </button>
 
               <button
-                onClick={clearCanvasRemote}
-                className="px-4 py-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 font-semibold text-sm flex items-center space-x-2 transition-colors"
+                onClick={toggleMic}
+                className={`p-3.5 rounded-2xl transition-all shadow-sm flex items-center space-x-2 ${
+                  isMicOn 
+                    ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+                }`}
+                title={isMicOn ? "Mute Mic" : "Unmute Mic"}
               >
-                <Trash2 className="w-4 h-4" />
-                <span>Clear for Everyone</span>
+                {isMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                <span className="text-sm font-semibold hidden sm:inline">{isMicOn ? 'Mic On' : 'Muted'}</span>
+              </button>
+
+              <button
+                onClick={toggleScreenShare}
+                className={`p-3.5 rounded-2xl transition-all shadow-sm flex items-center space-x-2 ${
+                  isScreenSharing 
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-700' 
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+                }`}
+                title={isScreenSharing ? "Stop Sharing" : "Share Screen"}
+              >
+                {isScreenSharing ? <Monitor className="w-5 h-5" /> : <MonitorOff className="w-5 h-5" />}
+                <span className="text-sm font-semibold hidden sm:inline">{isScreenSharing ? 'Sharing' : 'Share Screen'}</span>
+              </button>
+
+              <button
+                onClick={toggleMyWhiteboard}
+                className={`p-3.5 rounded-2xl transition-all shadow-sm flex items-center space-x-2 font-bold ${
+                  isMyWhiteboardActive 
+                    ? 'bg-purple-600 text-white hover:bg-purple-700 shadow-purple-500/30' 
+                    : 'bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-slate-700 border border-purple-300 dark:border-purple-800'
+                }`}
+                title={isMyWhiteboardActive ? "Close My Whiteboard" : "Open My Whiteboard"}
+              >
+                <Pencil className="w-5 h-5" />
+                <span className="text-sm font-semibold">{isMyWhiteboardActive ? 'Close Whiteboard' : 'Open Whiteboard'}</span>
               </button>
             </div>
-
-            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-inner bg-white cursor-crosshair">
-              <canvas
-                ref={canvasRef}
-                onMouseDown={startDrawing}
-                onMouseUp={stopDrawing}
-                onMouseMove={draw}
-                onMouseLeave={stopDrawing}
-                onTouchStart={startDrawing}
-                onTouchEnd={stopDrawing}
-                onTouchMove={draw}
-                className="w-full touch-none"
-              />
-            </div>
-            <p className="text-xs text-center text-slate-400">
-              ⚡ All strokes drawn here are synchronized in real time across all connected study table members.
-            </p>
           </div>
         )}
 
-        {/* Tab 3: Pomodoro & Focus */}
+        {/* Tab 2: Pomodoro & Focus */}
         {activeTab === 'pomodoro' && (
           <div className="p-12 text-center max-w-xl mx-auto space-y-8">
             <div className="inline-block p-4 bg-blue-50 dark:bg-blue-950/30 rounded-full text-blue-600 dark:text-blue-400 mb-2">
