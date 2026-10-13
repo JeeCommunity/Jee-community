@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Sparkles, Video, Palette, PartyPopper, BookOpen } from 'lucide-react';
+import { X, Sparkles, Video, Palette, PartyPopper } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../AuthContext';
 
@@ -12,7 +12,7 @@ export default function WhatsNewModal() {
     if (!user) return;
     
     // Check local storage to see if user has seen this specific update
-    const updateKey = 'hasSeenUpdate_DigitalLibrary_2026';
+    const updateKey = 'hasSeenUpdate_LiveStudyRoom_2026';
     const hasSeen = localStorage.getItem(updateKey);
     
     if (!hasSeen) {
@@ -23,7 +23,7 @@ export default function WhatsNewModal() {
   }, [user]);
 
   const handleClose = () => {
-    localStorage.setItem('hasSeenUpdate_DigitalLibrary_2026', 'true');
+    localStorage.setItem('hasSeenUpdate_LiveStudyRoom_2026', 'true');
     setIsOpen(false);
   };
 
@@ -57,7 +57,7 @@ export default function WhatsNewModal() {
               <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md mb-4 border border-white/30 shadow-sm">
                 <PartyPopper className="w-6 h-6 text-yellow-300" />
               </div>
-              <h2 className="text-2xl font-bold mb-1">New: Digital Library Meet 🎥</h2>
+              <h2 className="text-2xl font-bold mb-1">New: Live Study Room Meet 🎥</h2>
               <p className="text-blue-100 text-sm">Join live video study rooms, collaborate on the real-time whiteboard, and share your screen.</p>
             </div>
           </div>
@@ -97,9 +97,9 @@ export default function WhatsNewModal() {
                 <Sparkles className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Pomodoro & Lo-Fi Focus Music</h3>
+                <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Pomodoro & Focus Tools</h3>
                 <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Stay super productive with built-in 25-minute Pomodoro study timers and calming ambient focus beats.
+                  Stay super productive with built-in study timers and collaborative tools.
                 </p>
               </div>
             </div>
@@ -112,7 +112,7 @@ export default function WhatsNewModal() {
               onClick={handleClose}
               className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-sm transition-colors active:scale-[0.98]"
             >
-              Explore Digital Library 🚀
+              Get Started 🚀
             </button>
           </div>
 
