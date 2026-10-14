@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JEE Mind-Trap: Silly Mistake Survival</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card: #161f33;
+      --accent: #38bdf8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #eab308;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      user-select: none;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 15px;
+      overflow-x: hidden;
+    }
+
+    .game-wrapper {
+      width: 100%;
+      max-width: 480px;
+      background: var(--card);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Screen Shake & Flash Animations */
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-8px); }
+      40%, 80% { transform: translateX(8px); }
+    }
+    .shake { animation: shake 0.35s ease; }
+    .flash-green { box-shadow: 0 0 30px rgba(34, 197, 94, 0.6), inset 0 0 20px rgba(34, 197, 94, 0.3); }
+    .flash-red { box-shadow: 0 0 30px rgba(239, 68, 68, 0.6), inset 0 0 20px rgba(239, 68, 68, 0.3); }
+
+    /* Top HUD */
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .hud-box { text-align: center; }
+    .hud-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    .hud-val { font-size: 22px; font-weight: 800; }
+    #timer-val { color: var(--accent); font-variant-numeric: tabular-nums; }
+    .timer-danger { color: var(--red) !important; animation: pulse 0.6s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.15); }
+    }
+
+    /* Streak Banner */
+    .streak-bar {
+      text-align: center;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 15px;
+      padding: 6px;
+      border-radius: 8px;
+      background: rgba(234, 179, 8, 0.12);
+      color: var(--yellow);
+      transition: 0.3s;
+    }
+    .air-mode {
+      background: linear-gradient(90deg, #ec4899, #8b5cf6, #3b82f6);
+      color: #fff;
+      box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
+    }
+
+    /* Challenge Stage */
+    .trap-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+
+    .instruction {
+      font-size: 18px;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 15px;
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1.35;
+    }
+
+    .highlight-word {
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.12);
+      margin: 0 5px;
+      text-decoration: underline;
+    }
+
+    .visual-stage {
+      background: #090d16;
+      border-radius: 16px;
+      height: 150px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      position: relative;
+    }
+
+    /* Options Grid */
+    .options-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .opt-btn {
+      background: #1e293b;
+      color: var(--text);
+      border: 2px solid #334155;
+      padding: 16px 10px;
+      border-radius: 12px;
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 64px;
+    }
+
+    .opt-btn:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: #263449;
+      transform: translateY(-2px);
+    }
+
+    .opt-btn:active:not(:disabled) { transform: scale(0.97); }
+    .opt-btn:disabled { opacity: 0.2; cursor: not-allowed; }
+
+    /* Lifelines / Strategy Bar */
+    .strategy-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .strat-btn {
+      padding: 12px;
+      border-radius: 10px;
+      border: none;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+      transition: 0.2s;
+    }
+
+    .btn-5050 { background: rgba(234, 179, 8, 0.15); color: var(--yellow); border: 1px solid rgba(234, 179, 8, 0.4); }
+    .btn-5050:hover:not(:disabled) { background: rgba(234, 179, 8, 0.25); }
+    .btn-5050:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-skip { background: rgba(148, 163, 184, 0.15); color: var(--text); border: 1px solid rgba(148, 163, 184, 0.3); }
+    .btn-skip:hover { background: rgba(148, 163, 184, 0.25); }
+
+    /* Screens */
+    .screen { display: none; text-align: center; }
+    .screen.active { display: block; }
+
+    .title { font-size: 26px; font-weight: 800; margin-bottom: 8px; background: linear-gradient(90deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .subtitle { font-size: 14px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+
+    .rules-box {
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: left;
+      margin-bottom: 20px;
+      font-size: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .rules-box div { margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .tag-plus { background: rgba(34, 197, 94, 0.2); color: var(--green); padding: 2px 8px; border-radius: 6px; font-weight: 700; }
+    .tag-minus { background: rgba(239, 68, 68, 0.2); color: var(--red); padding: 2px 8px; border-radius: 6px; font-weight: 700; }
+    .tag-zero { background: rgba(148, 163, 184, 0.2); color: var(--muted); padding: 2px 8px; border-radius: 6px; font-weight: 700; }
+
+    .name-input {
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      background: #090d16;
+      color: #fff;
+      font-size: 16px;
+      margin-bottom: 16px;
+      text-align: center;
+      outline: none;
+    }
+    .name-input:focus { border-color: var(--accent); }
+
+    .primary-btn {
+      width: 100%;
+      padding: 16px;
+      border-radius: 12px;
+      border: none;
+      background: linear-gradient(135deg, #0284c7, #4f46e5);
+      color: white;
+      font-size: 17px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4);
+      transition: 0.2s;
+      margin-bottom: 10px;
+    }
+    .primary-btn:hover { transform: translateY(-2px); }
+
+    /* Mini Grids for Memory Trap */
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      width: 48px;
+      height: 48px;
+    }
+    .mini-cell {
+      background: #334155;
+      border-radius: 3px;
+    }
+    .mini-cell.lit { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+    .big-grid {
+      width: 110px;
+      height: 110px;
+      gap: 6px;
+    }
+
+    /* Floating Score Feedback */
+    .float-feedback {
+      position: absolute;
+      top: 15px;
+      right: 20px;
+      font-weight: 900;
+      font-size: 22px;
+      pointer-events: none;
+      opacity: 0;
+      transition: 0.4s ease;
+    }
+    .float-show { opacity: 1; transform: translateY(-10px); }
+  </style>
+</head>
+<body>
+
+  <div class="game-wrapper" id="game-card">
+    <div id="float-msg" class="float-feedback">+4</div>
+
+    <!-- 1. START SCREEN -->
+    <div id="start-screen" class="screen active">
+      <div class="trap-badge">JEE Community Arcade</div>
+      <h1 class="title">Silly Mistake Survival</h1>
+      <p class="subtitle">No Formulas. No Syllabus. Pure IQ, Observation & Reflex Test under JEE Negative Marking Pressure!</p>
+
+      <div class="rules-box">
+        <div><span class="tag-plus">+4 Marks</span> Correct Answer (Streak 5 = <b>+8 AIR Boost!</b>)</div>
+        <div><span class="tag-minus">-1 Mark</span> Silly Mistake (Wrong Click = Streak Reset)</div>
+        <div><span class="tag-zero">0 Marks</span> Smart Skip (Save yourself from -1)</div>
+        <div><span class="tag-minus">-5 Sec</span> 50:50 Eliminate (Removes 2 wrong options)</div>
+      </div>
+
+      <input type="text" id="player-name" class="name-input" placeholder="Enter Your Name / Roll No." maxlength="18">
+      <button class="primary-btn" onclick="startGame()">ENTER EXAM HALL (60s)</button>
+    </div>
+
+    <!-- 2. PLAY SCREEN -->
+    <div id="play-screen" class="screen">
+      <div class="hud">
+        <div class="hud-box">
+          <div class="hud-label">Score</div>
+          <div class="hud-val" id="score-val">0</div>
+        </div>
+        <div class="hud-box">
+          <div class="hud-label">Time Left</div>
+          <div class="hud-val" id="timer-val">60s</div>
+        </div>
+        <div class="hud-box">
+          <div class="hud-label">Accuracy</div>
+          <div class="hud-val" id="acc-val">100%</div>
+        </div>
+      </div>
+
+      <div id="streak-banner" class="streak-bar">🔥 Streak: 0 (Hit 5 for 2x AIR-1 Boost)</div>
+
+      <div style="text-align: center;">
+        <span id="trap-type" class="trap-badge">Visual Trap</span>
+      </div>
+
+      <div id="instruction-text" class="instruction">Instruction goes here</div>
+
+      <div id="visual-stage" class="visual-stage"></div>
+
+      <div id="options-container" class="options-grid"></div>
+
+      <div class="strategy-bar">
+        <button id="btn-5050" class="strat-btn btn-5050" onclick="use5050()">⚡ 50:50 (-5s)</button>
+        <button class="strat-btn btn-skip" onclick="skipQuestion()">⏭️ Smart Skip (0)</button>
+      </div>
+    </div>
+
+    <!-- 3. GAME OVER SCREEN -->
+    <div id="over-screen" class="screen">
+      <div class="trap-badge">Time's Up!</div>
+      <h1 class="title" id="final-rank-title">NIT Confirmed!</h1>
+      <p class="subtitle" id="player-summary">Player Scorecard</p>
+
+      <div class="rules-box" style="text-align: center;">
+        <div style="justify-content: space-around; margin-bottom: 12px;">
+          <div>
+            <div class="hud-label">Final Score</div>
+            <div class="hud-val" id="final-score" style="color: var(--accent); font-size: 32px;">0</div>
+          </div>
+          <div>
+            <div class="hud-label">Best Streak</div>
+            <div class="hud-val" id="final-streak" style="color: var(--yellow); font-size: 32px;">0</div>
+          </div>
+        </div>
+        <hr style="border-color: rgba(255,255,255,0.08); margin-bottom: 12px;">
+        <div style="justify-content: space-between;">
+          <span>✅ Correct: <b id="stat-correct" style="color:var(--green)">0</b></span>
+          <span>❌ Negatives (-1): <b id="stat-wrong" style="color:var(--red)">0</b></span>
+          <span>⏭️ Skipped: <b id="stat-skip">0</b></span>
+        </div>
+      </div>
+
+      <button class="primary-btn" onclick="shareScore()" style="background: linear-gradient(135deg, #16a34a, #059669);">📤 Share Score to Community</button>
+      <button class="strat-btn btn-skip" style="width: 100%; padding: 14px;" onclick="startGame()">🔄 Play Again</button>
+    </div>
+  </div>
+
+  <script>
+    let score = 0;
+    let timeLeft = 60;
+    let timerInterval = null;
+    let streak = 0;
+    let maxStreak = 0;
+    let correctCount = 0;
+    let wrongCount = 0;
+    let skipCount = 0;
+    let currentCorrectIndex = 0;
+    let isLocked = false;
+    let playerName = "Aspirant";
+
+    const COLORS = [
+      { name: "RED", hex: "#ef4444" },
+      { name: "BLUE", hex: "#3b82f6" },
+      { name: "GREEN", hex: "#22c55e" },
+      { name: "YELLOW", hex: "#eab308" }
+    ];
+
+    const ARROWS = [
+      { name: "UP ⬆️", dir: "UP", opp: "DOWN", sym: "⬆️" },
+      { name: "DOWN ⬇️", dir: "DOWN", opp: "UP", sym: "⬇️" },
+      { name: "LEFT ⬅️", dir: "LEFT", opp: "RIGHT", sym: "⬅️" },
+      { name: "RIGHT ➡️", dir: "RIGHT", opp: "LEFT", sym: "➡️" }
+    ];
+
+    function startGame() {
+      const nameVal = document.getElementById('player-name').value.trim();
+      if (nameVal) playerName = nameVal;
+
+      score = 0;
+      timeLeft = 60;
+      streak = 0;
+      maxStreak = 0;
+      correctCount = 0;
+      wrongCount = 0;
+      skipCount = 0;
+      isLocked = false;
+
+      document.getElementById('start-screen').classList.remove('active');
+      document.getElementById('over-screen').classList.remove('active');
+      document.getElementById('play-screen').classList.add('active');
+
+      updateHUD();
+      nextTrap();
+
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        timeLeft--;
+        updateTimerUI();
+        if (timeLeft <= 0) {
+          endGame();
+        }
+      }, 1000);
+    }
+
+    function updateTimerUI() {
+      const timerEl = document.getElementById('timer-val');
+      timerEl.innerText = Math.max(0, timeLeft) + "s";
+      if (timeLeft <= 10) {
+        timerEl.classList.add('timer-danger');
+      } else {
+        timerEl.classList.remove('timer-danger');
+      }
+    }
+
+    function updateHUD() {
+      document.getElementById('score-val').innerText = score;
+      updateTimerUI();
+      const total = correctCount + wrongCount;
+      const acc = total === 0 ? 100 : Math.round((correctCount / total) * 100);
+      document.getElementById('acc-val').innerText = acc + "%";
+
+      const banner = document.getElementById('streak-banner');
+      if (streak >= 5) {
+        banner.innerText = `🚀 AIR-1 MODE ACTIVE! Streak: ${streak} (+8 Points per hit!)`;
+        banner.classList.add('air-mode');
+      } else {
+        banner.innerText = `🔥 Streak: ${streak} (Hit 5 for 2x AIR-1 Boost)`;
+        banner.classList.remove('air-mode');
+      }
+    }
+
+    function nextTrap() {
+      isLocked = false;
+      document.getElementById('btn-5050').disabled = false;
+
+      // Pick random trap from 4 generators
+      const trapTypes = [generateStroopTrap, generateArrowTrap, generateIllusionTrap, generateMemoryTrap];
+      const chosenGenerator = trapTypes[Math.floor(Math.random() * trapTypes.length)];
+      chosenGenerator();
+    }
+
+    // TRAP 1: COLOR vs WORD STROOP
+    function generateStroopTrap() {
+      document.getElementById('trap-type').innerText = "🧠 Focus Trap";
+      const wordIdx = Math.floor(Math.random() * 4);
+      let colorIdx = Math.floor(Math.random() * 4);
+      if (colorIdx === wordIdx) colorIdx = (colorIdx + 1) % 4; // Force mismatch
+
+      const askForColor = Math.random() < 0.5;
+      const instr = document.getElementById('instruction-text');
+      if (askForColor) {
+        instr.innerHTML = `Select the <span class="highlight-word">INK COLOR</span> (Not the Word!)`;
+        currentCorrectIndex = colorIdx;
+      } else {
+        instr.innerHTML = `Select the <span class="highlight-word">WRITTEN WORD</span> (Ignore Color!)`;
+        currentCorrectIndex = wordIdx;
+      }
+
+      const stage = document.getElementById('visual-stage');
+      stage.innerHTML = `<div style="font-size: 52px; font-weight: 900; letter-spacing: 3px; color: ${COLORS[colorIdx].hex};">${COLORS[wordIdx].name}</div>`;
+
+      renderOptions(COLORS.map(c => c.name));
+    }
+
+    // TRAP 2: GREEN / RED DIRECTION REFLEX
+    function generateArrowTrap() {
+      document.getElementById('trap-type').innerText = "⚡ Reflex Trap";
+      const arrIdx = Math.floor(Math.random() * 4);
+      const isReverse = Math.random() < 0.55; // Red = Reverse
+
+      const instr = document.getElementById('instruction-text');
+      if (isReverse) {
+        instr.innerHTML = `RED Box = Tap <span class="highlight-word" style="color:#ef4444">OPPOSITE</span> Direction!`;
+      } else {
+        instr.innerHTML = `GREEN Box = Tap <span class="highlight-word" style="color:#22c55e">SAME</span> Direction!`;
+      }
+
+      const targetDir = isReverse ? ARROWS[arrIdx].opp : ARROWS[arrIdx].dir;
+      currentCorrectIndex = ARROWS.findIndex(a => a.dir === targetDir);
+
+      const bgCol = isReverse ? "rgba(239, 68, 68, 0.2)" : "rgba(34, 197, 94, 0.2)";
+      const borderCol = isReverse ? "#ef4444" : "#22c55e";
+
+      const stage = document.getElementById('visual-stage');
+      stage.innerHTML = `
+        <div style="width: 95px; height: 95px; border-radius: 20px; background: ${bgCol}; border: 3px solid ${borderCol}; display:flex; justify-content:center; align-items:center; font-size: 50px;">
+          ${ARROWS[arrIdx].sym}
+        </div>
+      `;
+
+      renderOptions(ARROWS.map(a => a.name));
+    }
+
+    // TRAP 3: NUMBER VALUE VS FONT SIZE ILLUSION
+    function generateIllusionTrap() {
+      document.getElementById('trap-type').innerText = "👁️ Size Illusion";
+      const askSmallest = Math.random() < 0.5;
+      const instr = document.getElementById('instruction-text');
+
+      if (askSmallest) {
+        instr.innerHTML = `Tap the <span class="highlight-word">SMALLEST VALUE</span> (Ignore Font Size!)`;
+      } else {
+        instr.innerHTML = `Tap the <span class="highlight-word">LARGEST VALUE</span> (Ignore Font Size!)`;
+      }
+
+      // Generate 4 unique 2-digit numbers
+      const nums = [];
+      while (nums.length < 4) {
+        const n = Math.floor(Math.random() * 80) + 11;
+        if (!nums.includes(n)) nums.push(n);
+      }
+
+      const targetVal = askSmallest ? Math.min(...nums) : Math.max(...nums);
+      currentCorrectIndex = nums.indexOf(targetVal);
+
+      // Give misleading font sizes
+      const stage = document.getElementById('visual-stage');
+      stage.innerHTML = `<div style="display:flex; gap: 22px; align-items:center;">
+        ${nums.map(n => {
+          const isExtreme = (n === targetVal);
+          const fontSize = isExtreme ? "18px" : "44px";
+          return `<span style="font-size:${fontSize}; font-weight:800; color:#e2e8f0;">${n}</span>`;
+        }).join('')}
+      </div>`;
+
+      renderOptions(nums.map(n => n.toString()));
+    }
+
+    // TRAP 4: 1-SECOND PHOTOGRAPHIC MEMORY GRID
+    function generateMemoryTrap() {
+      document.getElementById('trap-type').innerText = "📸 Photographic Memory";
+      const instr = document.getElementById('instruction-text');
+      instr.innerHTML = `Memorize the pattern! Hiding in <span class="highlight-word">0.8 sec</span>...`;
+
+      // Create 4 distinct 3x3 patterns with 3 lit cells
+      const patterns = [];
+      while (patterns.length < 4) {
+        const pat = Array(9).fill(0);
+        let lit = 0;
+        while (lit < 3) {
+          const r = Math.floor(Math.random() * 9);
+          if (pat[r] === 0) { pat[r] = 1; lit++; }
+        }
+        const key = pat.join('');
+        if (!patterns.some(p => p.join('') === key)) patterns.push(pat);
+      }
+
+      currentCorrectIndex = Math.floor(Math.random() * 4);
+      const correctPat = patterns[currentCorrectIndex];
+
+      const stage = document.getElementById('visual-stage');
+      stage.innerHTML = buildGridHTML(correctPat, true);
+
+      // Hide options briefly so they focus
+      const container = document.getElementById('options-container');
+      container.innerHTML = `<div style="grid-column: span 2; text-align:center; color:var(--muted); padding: 20px;">Wait for pattern to hide...</div>`;
+
+      setTimeout(() => {
+        if (timeLeft <= 0) return;
+        stage.innerHTML = `<div style="font-size: 16px; color: var(--muted); font-weight:700;">❓ Which pattern was shown?</div>`;
+        instr.innerHTML = `Select the <span class="highlight-word">EXACT GRID</span> you just saw!`;
+
+        container.innerHTML = '';
+        patterns.forEach((pat, idx) => {
+          const btn = document.createElement('button');
+          btn.className = 'opt-btn';
+          btn.innerHTML = buildGridHTML(pat, false);
+          btn.onclick = () => handleAnswer(idx);
+          container.appendChild(btn);
+        });
+      }, 850);
+    }
+
+    function buildGridHTML(pattern, isBig) {
+      return `<div class="mini-grid ${isBig ? 'big-grid' : ''}">
+        ${pattern.map(cell => `<div class="mini-cell ${cell ? 'lit' : ''}"></div>`).join('')}
+      </div>`;
+    }
+
+    function renderOptions(labels) {
+      const container = document.getElementById('options-container');
+      container.innerHTML = '';
+      labels.forEach((label, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'opt-btn';
+        btn.innerText = label;
+        btn.onclick = () => handleAnswer(idx);
+        container.appendChild(btn);
+      });
+    }
+
+    function handleAnswer(selectedIndex) {
+      if (isLocked) return;
+      isLocked = true;
+
+      const card = document.getElementById('game-card');
+      card.classList.remove('shake', 'flash-green', 'flash-red');
+      void card.offsetWidth; // trigger reflow
+
+      if (selectedIndex === currentCorrectIndex) {
+        streak++;
+        if (streak > maxStreak) maxStreak = streak;
+        correctCount++;
+        const pts = streak >= 5 ? 8 : 4;
+        score += pts;
+        card.classList.add('flash-green');
+        showFloat(`+${pts}`, 'var(--green)');
+      } else {
+        streak = 0;
+        wrongCount++;
+        score -= 1;
+        card.classList.add('shake', 'flash-red');
+        showFloat(`-1`, 'var(--red)');
+      }
+
+      updateHUD();
+      setTimeout(nextTrap, 260);
+    }
+
+    function skipQuestion() {
+      if (isLocked) return;
+      skipCount++;
+      showFloat(`SKIP (0)`, 'var(--muted)');
+      nextTrap();
+    }
+
+    function use5050() {
+      if (isLocked || timeLeft <= 5) return;
+      const buttons = document.querySelectorAll('#options-container .opt-btn');
+      if (buttons.length < 4) return;
+
+      timeLeft -= 5;
+      updateTimerUI();
+      showFloat(`-5s`, 'var(--yellow)');
+
+      let removed = 0;
+      const indices = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+      for (let i of indices) {
+        if (i !== currentCorrectIndex && removed < 2) {
+          buttons[i].disabled = true;
+          removed++;
+        }
+      }
+      document.getElementById('btn-5050').disabled = true;
+    }
+
+    function showFloat(text, color) {
+      const el = document.getElementById('float-msg');
+      el.innerText = text;
+      el.style.color = color;
+      el.classList.add('float-show');
+      setTimeout(() => el.classList.remove('float-show'), 500);
+    }
+
+    function endGame() {
+      clearInterval(timerInterval);
+      document.getElementById('play-screen').classList.remove('active');
+      document.getElementById('over-screen').classList.add('active');
+
+      document.getElementById('final-score').innerText = score;
+      document.getElementById('final-streak').innerText = maxStreak;
+      document.getElementById('stat-correct').innerText = correctCount;
+      document.getElementById('stat-wrong').innerText = wrongCount;
+      document.getElementById('stat-skip').innerText = skipCount;
+
+      let rankTitle = "Backlog Victim 😅";
+      if (score >= 80) rankTitle = "AIR-1 Material (IIT Bombay CSE) 🏆";
+      else if (score >= 50) rankTitle = "Top IITian Reflexes! 🔥";
+      else if (score >= 25) rankTitle = "NIT Trichy Confirmed! 💪";
+      else if (score >= 10) rankTitle = "Too Many Silly Mistakes! ⚠️";
+
+      document.getElementById('final-rank-title').innerText = rankTitle;
+      document.getElementById('player-summary').innerText = `Well played, ${playerName}!`;
+    }
+
+    function shareScore() {
+      const text = `🔥 JEE Silly Mistake Survival 🔥\nPlayer: ${playerName}\nScore: ${score} Marks\nAccuracy: ${document.getElementById('acc-val').innerText}\nNegatives (-1): ${wrongCount}\n\nCan you beat my score without getting -1? Play on JEE Community!`;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text);
+        alert("Scorecard copied! Ab apne JEE group/community mein paste karke dosto ko challenge karo!");
+      } else {
+        alert(text);
+      }
+    }
+  </script>
+</body>
+</html>
