@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Send, ThumbsUp, ThumbsDown, MoreVertical, Trash, Edit, Check, Reply, MessageCircle, Loader2, ChevronLeft, Info, FileText, Image as ImageIcon  } from 'lucide-react';
+import { X, Send, ThumbsUp, ThumbsDown, MoreVertical, Trash, Edit, Check, Reply, MessageCircle, Loader2, ChevronLeft, Info, FileText, Image as ImageIcon, Ban } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { 
   collection, 
@@ -23,6 +23,8 @@ import { cn, getFirstName } from '../lib/utils';
 import { uploadFileToCloudinary } from '../lib/cloudinary';
 import UserProfileModal from './UserProfileModal';
 import { createNotification } from '../lib/notifications';
+import toast from 'react-hot-toast';
+import { logManagerAction } from '../lib/managerLogs';
 
 interface Comment {
   id: string;
@@ -233,6 +235,9 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
                     <h3 className="font-bold text-slate-900 dark:text-white">{getFirstName(author?.fullName) || 'Loading...'}</h3>
                     {author?.role === 'admin' && (
                       <span className="text-[10px] font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white px-1.5 py-0.5 rounded shadow-sm border border-cyan-400/50 uppercase tracking-wide">Admin</span>
+                    )}
+                    {author?.role === 'community_manager' && (
+                      <span className="text-[10px] font-bold bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-1.5 py-0.5 rounded shadow-sm border border-emerald-400/50 tracking-wide flex items-center gap-0.5">🛡️ Manager</span>
                     )}
                   </div>
                   <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
@@ -510,7 +515,7 @@ interface CommentItemProps {
 }
 
 const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [author, setAuthor] = useState<any>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -521,14 +526,24 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
   const menuRef = useRef<HTMLDivElement>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
-  const isAdmin = user?.email === 'aistoryimage1999@gmail.com';
+  const isAdmin = user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin';
+  const postCommunity = post.communityType || 'JEE';
+  const isManagerForPost = profile?.role === 'community_manager' && (
+    !profile?.managerPermissions?.managedCommunity ||
+    profile?.managerPermissions?.managedCommunity === 'ALL' ||
+    profile?.managerPermissions?.managedCommunity === postCommunity ||
+    postCommunity === 'Both'
+  );
+  const canManagerDeleteComment = isManagerForPost && !!profile?.managerPermissions?.canDeletePosts;
+  const canManagerMuteCommenter = isManagerForPost && !!profile?.managerPermissions?.canMuteUsers && author?.role !== 'admin' && author?.role !== 'community_manager' && comment.authorId !== user?.uid;
+
   const isCommentOwner = user?.uid === comment.authorId;
   const isPostOwner = user?.uid === post.authorId;
-  const canDelete = isCommentOwner || isPostOwner || isAdmin;
+  const canDelete = isCommentOwner || isPostOwner || isAdmin || canManagerDeleteComment;
   const canEdit = isCommentOwner || isAdmin;
   
-  const isLiked = user && comment.likedBy?.includes(user.uid);
-  if (comment.isDeleted && isCommentOwner) return null;
+  const isLiked = user && (comment as any).likedBy?.includes(user.uid);
+  if ((comment as any).isDeleted && isCommentOwner) return null;
 
   useEffect(() => {
     const fetchAuthor = async () => {
@@ -574,8 +589,55 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
       await updateDoc(doc(db, 'posts', post.id), {
         commentsCount: Math.max(0, (post.commentsCount || 0) - 1)
       });
-    } catch (error) {
+      if (!isAdmin && !isCommentOwner && !isPostOwner && canManagerDeleteComment && user && profile) {
+        await logManagerAction({
+          managerId: user.uid,
+          managerName: profile.fullName || profile.username || 'Manager',
+          managerUsername: profile.username,
+          actionType: 'delete_comment',
+          targetId: comment.id,
+          targetUserId: comment.authorId,
+          targetUserName: author?.fullName || author?.username || 'Student',
+          targetSummary: (comment.text || 'Image comment').slice(0, 120),
+          community: postCommunity,
+        });
+      }
+      toast.success('Comment deleted');
+    } catch (error: any) {
       console.error("Error deleting comment:", error?.message || 'Error');
+    }
+  };
+
+  const handleToggleMuteCommenter = async () => {
+    if (!user || (!isAdmin && !canManagerMuteCommenter) || !comment.authorId) return;
+    if (author?.role === 'admin' || (!isAdmin && author?.role === 'community_manager')) {
+      toast.error('Cannot mute an Admin or Manager');
+      return;
+    }
+    const nextBlocked = !author?.isBlocked;
+    try {
+      await updateDoc(doc(db, 'users', comment.authorId), {
+        isBlocked: nextBlocked
+      });
+      setAuthor((prev: any) => prev ? { ...prev, isBlocked: nextBlocked } : prev);
+      if (!isAdmin && canManagerMuteCommenter && profile) {
+        await logManagerAction({
+          managerId: user.uid,
+          managerName: profile.fullName || profile.username || 'Manager',
+          managerUsername: profile.username,
+          actionType: nextBlocked ? 'mute_user' : 'unmute_user',
+          targetId: comment.authorId,
+          targetUserId: comment.authorId,
+          targetUserName: author?.fullName || author?.username || 'Student',
+          targetSummary: `From comment: ${(comment.text || '').slice(0, 80)}`,
+          community: postCommunity,
+        });
+      }
+      toast.success(nextBlocked ? 'User muted from posting/commenting' : 'User unmuted');
+      setShowMenu(false);
+    } catch (err: any) {
+      console.error('Failed to mute user from comment:', err);
+      toast.error('Failed to update user status');
     }
   };
 
@@ -651,10 +713,16 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
               {author?.role === 'admin' && (
                 <span className="text-[9px] font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white px-1.5 py-0.5 rounded shadow-sm border border-cyan-400/50 uppercase tracking-wide shrink-0">Admin</span>
               )}
+              {author?.role === 'community_manager' && (
+                <span className="text-[9px] font-bold bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-1.5 py-0.5 rounded shadow-sm border border-emerald-400/50 tracking-wide shrink-0 flex items-center gap-0.5">🛡️ Manager</span>
+              )}
+              {author?.isBlocked && (isAdmin || canManagerMuteCommenter) && (
+                <span className="text-[9px] font-bold bg-red-100 text-red-700 px-1 py-0.5 rounded uppercase shrink-0">Muted</span>
+              )}
             </div>
             
             {/* Menu */}
-            {(isCommentOwner || canDelete) && (
+            {(isCommentOwner || canDelete || isAdmin || canManagerMuteCommenter) && (
               <div className="relative shrink-0 ml-2" ref={menuRef}>
                 <button 
                   onClick={() => setShowMenu(!showMenu)} 
@@ -663,7 +731,7 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
                   <MoreVertical className="w-4 h-4" />
                 </button>
                 {showMenu && (
-                  <div className="absolute right-0 mt-1 w-32 bg-white dark:bg-slate-900 rounded-xl shadow-lg py-1 border border-slate-100 dark:border-slate-800 z-10">
+                  <div className="absolute right-0 mt-1 w-36 bg-white dark:bg-slate-900 rounded-xl shadow-lg py-1 border border-slate-100 dark:border-slate-800 z-10">
                     {canEdit && (
                       <button 
                         onClick={() => { setEditedText(comment.text); setEditedImageUrl(comment.imageUrl); setIsEditing(true); setShowMenu(false); }}
@@ -680,6 +748,15 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
                       >
                         <Trash className="w-3.5 h-3.5 mr-2" />
                         Delete
+                      </button>
+                    )}
+                    {(isAdmin || canManagerMuteCommenter) && comment.authorId !== user?.uid && author?.role !== 'admin' && (
+                      <button
+                        onClick={handleToggleMuteCommenter}
+                        className="w-full text-left px-4 py-2 text-xs text-amber-600 hover:bg-amber-50 flex items-center"
+                      >
+                        <Ban className="w-3.5 h-3.5 mr-2" />
+                        {author?.isBlocked ? 'Unmute User' : 'Mute User'}
                       </button>
                     )}
                   </div>

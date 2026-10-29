@@ -331,7 +331,14 @@ The student's doubt is:
     const runGemini = async () => {
       if (!process.env.GEMINI_API_KEY) throw new Error("No Gemini API key");
       
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
       const parts: any[] = [{ text: prompt }];
       
       if (isVision) {
@@ -349,9 +356,8 @@ The student's doubt is:
         }
       }
       
-      // We will use gemini-2.5-pro for best reasoning & accuracy, or fallback to flash
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: [{ role: "user", parts: parts }]
       });
       let content = response.text || "";
@@ -481,7 +487,14 @@ Always cite the URL using Markdown links.`;
     }
 
     const runGemini = async () => {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
       const formattedMessages = messages.map((m: any) => {
          const parts: any[] = [];
          if (m.content) parts.push({ text: m.content });
@@ -505,7 +518,7 @@ Always cite the URL using Markdown links.`;
       }
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: formattedMessages,
         config: { 
           systemInstruction,
@@ -901,6 +914,111 @@ app.post('/api/admin/send-reminders', async (req, res) => {
   }
 });
 
+// Manager AI Feature Studio Endpoint (Sandbox Feature Builder)
+app.post('/api/sandbox/generate-feature', async (req, res) => {
+  try {
+    const { prompt, category, title } = req.body;
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    const systemPrompt = `You are the AI Feature Builder for the JEE Community platform.
+A Community Manager or Super Admin has requested a new feature/update in Hinglish or English to be built inside the Sandbox.
+Return ONLY valid JSON matching the following structure (no markdown codeblocks, just raw JSON object):
+{
+  "suggestedCategory": "ai_mini_app" | "ui_section" | "study_countdown" | "poll_challenge" | "announcement_banner",
+  "changeSummary": "Short 1-line summary in Hinglish of what feature was built",
+  "payload": {
+    "headline": "Feature title",
+    "subtitle": "Clear engaging description in simple Hinglish/English",
+    "badgeText": "⚡ SHORT BADGE",
+    "accentColor": "indigo" | "emerald" | "amber" | "rose" | "violet" | "cyan",
+    "ctaText": "Optional button label",
+    "ctaUrl": "/study-room",
+    "miniAppType": "calculator" | "quiz_flashcards" | "study_checklist_timer" | "custom_widget",
+    "calculatorConfig": {
+      "inputLabel": "e.g. Apna Expected JEE Main Score Dalein (Out of 300)",
+      "inputPlaceholder": "180",
+      "minVal": 0,
+      "maxVal": 300,
+      "defaultVal": 180,
+      "formulaType": "jee_marks_vs_percentile" | "study_hours_to_rank" | "accuracy_score" | "custom_multiplier",
+      "resultUnitLabel": "Expected Percentile & AIR Rank",
+      "helperNote": "Slider se apna score select karein"
+    },
+    "quizItems": [
+      {
+        "question": "JEE level question",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "correctIndex": 0,
+        "explanation": "Simple Hinglish explanation"
+      }
+    ],
+    "flashcards": [
+      { "front": "Concept / Formula Name", "back": "Formula & Trick", "tag": "Physics" }
+    ],
+    "checklistItems": [
+      { "id": "c1", "label": "Daily study task", "points": 50 }
+    ],
+    "timerMinutes": 25,
+    "customHtmlWidget": "Optional self-contained interactive HTML/CSS/JS string if miniAppType is custom_widget",
+    "bulletPoints": ["Point 1", "Point 2", "Point 3"],
+    "highlightStat": "🔥 100% Free for JEE Aspirants",
+    "examName": "JEE Main Upcoming Session",
+    "examDateISO": "2026-01-22T09:00",
+    "motivationalQuote": "Motivational quote for JEE students",
+    "resourceLinks": [
+      { "label": "📘 Open Notes Hub", "url": "/notes", "tag": "Free PDFs" }
+    ],
+    "pollQuestion": "Engaging poll question for JEE aspirants",
+    "pollOptions": [
+      { "id": "opt1", "text": "Option 1", "votes": 12 },
+      { "id": "opt2", "text": "Option 2", "votes": 9 },
+      { "id": "opt3", "text": "Option 3", "votes": 15 }
+    ],
+    "challengeTask": "Daily study challenge description",
+    "challengeRewardText": "+100 Focus XP Boost 🔥",
+    "bannerIcon": "🚀",
+    "isUrgent": true,
+    "superAdminCorePrompt": "Clean English/Hinglish prompt describing this feature"
+  }
+}`;
+
+    const userPrompt = `Requested Title: ${title || 'New JEE Feature'}
+Selected Category: ${category || 'ai_mini_app'}
+Manager's Prompt (Hinglish/English): "${prompt}"
+
+Generate the complete, rich, interactive feature configuration JSON now.`;
+
+    if (process.env.GEMINI_API_KEY) {
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: userPrompt,
+        config: {
+          systemInstruction: systemPrompt,
+          responseMimeType: 'application/json',
+        },
+      });
+      const rawText = (response.text || '').trim();
+      const parsed = JSON.parse(rawText);
+      return res.json(parsed);
+    }
+
+    return res.status(503).json({ error: 'AI key not configured on server, using client smart builder.' });
+  } catch (err: any) {
+    console.error('Sandbox AI Builder error:', err?.message || err);
+    return res.status(500).json({ error: 'Fallback to smart builder' });
+  }
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -925,9 +1043,16 @@ async function startServer() {
   wss.on("connection", async (clientWs) => {
     console.log("Client connected to Live API WebSocket");
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
       const session = await ai.live.connect({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-3.8-live",
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {

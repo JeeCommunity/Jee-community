@@ -1,63 +1,118 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSuperAdmin() {
+      return request.auth != null && (
+        request.auth.token.email == 'aistoryimage1999@gmail.com' ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin'
+        )
+      );
+    }
+
+    function hasUserDoc() {
+      return request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isCommunityManager() {
+      return hasUserDoc() && currentUserData().get('role', 'user') == 'community_manager';
+    }
+
+    function managerCanDeletePosts() {
+      return isCommunityManager() &&
+        currentUserData().get('managerPermissions', {}).get('canDeletePosts', false) == true;
+    }
+
+    function managerCanPostStatus() {
+      return isCommunityManager() &&
+        currentUserData().get('managerPermissions', {}).get('canPostStatus', false) == true;
+    }
+
     match /users/{uid} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.auth.uid == uid;
-      allow update: if request.auth != null;
-      allow delete: if request.auth != null && (request.auth.uid == uid || request.auth.token.email == 'aistoryimage1999@gmail.com');
+      allow update: if request.auth != null && (
+        isSuperAdmin() ||
+        (
+          request.resource.data.get('role', 'user') == resource.data.get('role', 'user') &&
+          request.resource.data.get('managerPermissions', null) == resource.data.get('managerPermissions', null)
+        )
+      );
+      allow delete: if request.auth != null && (request.auth.uid == uid || isSuperAdmin());
     }
+
     match /posts/{postId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update: if request.auth != null;
-      allow delete: if request.auth != null && (request.auth.uid == resource.data.authorId || request.auth.token.email == 'aistoryimage1999@gmail.com');
+      allow delete: if request.auth != null && (
+        request.auth.uid == resource.data.authorId ||
+        isSuperAdmin() ||
+        managerCanDeletePosts()
+      );
     }
+
     match /likes/{likeId} {
       allow read, write: if request.auth != null;
     }
+
     match /comments/{commentId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update: if request.auth != null;
       allow delete: if request.auth != null && (
-        request.auth.uid == resource.data.authorId || 
-        request.auth.uid == get(/databases/$(database)/documents/posts/$(resource.data.postId)).data.authorId ||
-        request.auth.token.email == 'aistoryimage1999@gmail.com'
+        request.auth.uid == resource.data.authorId ||
+        isSuperAdmin() ||
+        managerCanDeletePosts() ||
+        (
+          exists(/databases/$(database)/documents/posts/$(resource.data.postId)) &&
+          request.auth.uid == get(/databases/$(database)/documents/posts/$(resource.data.postId)).data.authorId
+        )
       );
+    }
+
+    match /manager_logs/{logId} {
+      allow read: if request.auth != null && (isSuperAdmin() || isCommunityManager());
+      allow create: if request.auth != null && (isSuperAdmin() || isCommunityManager());
+      allow update, delete: if isSuperAdmin();
     }
 
     match /study_sessions/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && (request.auth.uid == userId || request.auth.token.email == 'aistoryimage1999@gmail.com');
+      allow write: if request.auth != null && (request.auth.uid == userId || isSuperAdmin());
     }
 
     match /notes_hub/{noteId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update: if request.auth != null;
-      allow delete: if request.auth != null && (request.auth.uid == resource.data.uploadedBy.uid || request.auth.token.email == 'aistoryimage1999@gmail.com');
+      allow delete: if request.auth != null && (request.auth.uid == resource.data.uploadedBy.uid || isSuperAdmin());
     }
     
     match /study_notes/{noteId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update: if request.auth != null;
-      allow delete: if request.auth != null && (request.auth.uid == resource.data.authorId || request.auth.token.email == 'aistoryimage1999@gmail.com');
+      allow delete: if request.auth != null && (request.auth.uid == resource.data.authorId || isSuperAdmin());
     }
     
     match /note_upvotes/{upvoteId} {
       allow read, write: if request.auth != null;
     }
     match /feedback/{feedbackId} {
-      allow read: if request.auth != null && (request.auth.token.email == 'aistoryimage1999@gmail.com' || request.auth.uid == resource.data.userId);
+      allow read: if request.auth != null && (isSuperAdmin() || request.auth.uid == resource.data.userId);
       allow create: if request.auth != null;
-      allow update: if request.auth != null && request.auth.token.email == 'aistoryimage1999@gmail.com';
-      allow delete: if request.auth != null && request.auth.token.email == 'aistoryimage1999@gmail.com';
+      allow update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
     }
     match /banned_emails/{email} {
       allow read: if true;
-      allow write: if request.auth != null && request.auth.token.email == 'aistoryimage1999@gmail.com';
+      allow write: if isSuperAdmin();
     }
     match /notifications/{notificationId} {
       allow read: if request.auth != null && request.auth.uid == resource.data.recipientId;
@@ -70,7 +125,7 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update: if request.auth != null;
-      allow delete: if request.auth != null && (request.auth.uid == resource.data.userId || request.auth.token.email == 'aistoryimage1999@gmail.com');
+      allow delete: if request.auth != null && (request.auth.uid == resource.data.userId || isSuperAdmin());
     }
     
     match /study_groups/{groupId} {
@@ -97,10 +152,7 @@ service cloud.firestore {
     
     match /admin_statuses/{statusId} {
       allow read: if request.auth != null;
-      allow create, update, delete: if request.auth != null && (
-        request.auth.token.email == 'aistoryimage1999@gmail.com' || 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
-      );
+      allow create, update, delete: if isSuperAdmin() || managerCanPostStatus();
       match /views/{userId} {
         allow read: if request.auth != null;
         allow write: if request.auth != null && request.auth.uid == userId;
@@ -108,17 +160,9 @@ service cloud.firestore {
     }
 
     match /status_replies/{replyId} {
-      allow read: if request.auth != null && (
-        request.auth.token.email == 'aistoryimage1999@gmail.com' || 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        request.auth.uid == resource.data.senderId
-      );
+      allow read: if isSuperAdmin() || (request.auth != null && request.auth.uid == resource.data.senderId);
       allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && (
-        request.auth.token.email == 'aistoryimage1999@gmail.com' || 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        request.auth.uid == resource.data.senderId
-      );
+      allow update, delete: if isSuperAdmin() || (request.auth != null && request.auth.uid == resource.data.senderId);
     }
   
     match /personal_notes/{noteId} {

@@ -257,6 +257,13 @@ export default function UserProfileModal({ user, session: initialSession, onClos
                 </span>
               </div>
             )}
+            {user?.role === "community_manager" && (
+              <div className="flex justify-center mt-1">
+                <span className="text-[10px] font-bold bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-2 py-0.5 rounded shadow-sm border border-emerald-400/50 tracking-wide flex items-center gap-1">
+                  🛡️ Manager
+                </span>
+              </div>
+            )}
             <p className="text-center text-xs text-slate-500 dark:text-slate-400 font-medium">@{user.username}</p>
           </div>
           

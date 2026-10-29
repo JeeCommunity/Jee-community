@@ -1,7 +1,7 @@
 import React from "react";
 import { useState, useEffect, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { ThumbsUp, ExternalLink, ThumbsDown, MessageCircle, Bookmark, MoreVertical, FileText, Trash, Edit, X, ChevronLeft, Check, AlertCircle, Sparkles, BarChart2, CheckCircle2, Pin, PinOff, ShieldAlert  } from 'lucide-react';
+import { ThumbsUp, ExternalLink, ThumbsDown, MessageCircle, Bookmark, MoreVertical, FileText, Trash, Edit, X, ChevronLeft, Check, AlertCircle, Sparkles, BarChart2, CheckCircle2, Pin, PinOff, ShieldAlert, Ban } from 'lucide-react';
 import { doc, getDoc, deleteDoc, updateDoc, arrayUnion, arrayRemove, increment } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../AuthContext';
@@ -10,6 +10,8 @@ import { safeStringify } from '../lib/safeStringify';
 import CommentsModal from './CommentsModal';
 import AISolverModal from './AISolverModal';
 import UserProfileModal from './UserProfileModal';
+import toast from 'react-hot-toast';
+import { logManagerAction } from '../lib/managerLogs';
 
 import { createNotification } from '../lib/notifications';
 
@@ -228,7 +230,17 @@ const handleVote = async (optionId: string) => {
   const menuRef = useRef<HTMLDivElement>(null);
   
   const isAdmin = user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin';
+  const postCommunity = post.communityType || 'JEE';
+  const isManagerForPost = profile?.role === 'community_manager' && (
+    !profile?.managerPermissions?.managedCommunity ||
+    profile?.managerPermissions?.managedCommunity === 'ALL' ||
+    profile?.managerPermissions?.managedCommunity === postCommunity ||
+    postCommunity === 'Both'
+  );
+  const canManagerDelete = isManagerForPost && !!profile?.managerPermissions?.canDeletePosts;
+  const canManagerMute = isManagerForPost && !!profile?.managerPermissions?.canMuteUsers && author?.role !== 'admin' && author?.role !== 'community_manager' && post.authorId !== user?.uid;
   const isOwner = user?.uid === post.authorId || isAdmin;
+  const canDeletePost = isOwner || canManagerDelete;
 
   const uploadFileToCloudinaryLocal = async (file: File): Promise<string> => {
     const { uploadFileToCloudinary } = await import('../lib/cloudinary');
@@ -257,13 +269,61 @@ const handleVote = async (optionId: string) => {
   }, []);
 
   const handleDelete = async () => {
-    if (!isOwner) return;
+    if (!canDeletePost) return;
     try {
       await deleteDoc(doc(db, 'posts', post.id));
+      if (!isAdmin && user?.uid !== post.authorId && canManagerDelete && user && profile) {
+        await logManagerAction({
+          managerId: user.uid,
+          managerName: profile.fullName || profile.username || 'Manager',
+          managerUsername: profile.username,
+          actionType: 'delete_post',
+          targetId: post.id,
+          targetUserId: post.authorId,
+          targetUserName: author?.fullName || author?.username || 'Student',
+          targetSummary: (post.text || 'Media post').slice(0, 120),
+          community: postCommunity,
+        });
+      }
       setShowDeleteConfirm(false);
+      toast.success('Post deleted');
       onDelete?.(post.id);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to delete", err?.message || 'Error');
+      toast.error('Failed to delete post');
+    }
+  };
+
+  const handleToggleMuteAuthor = async () => {
+    if (!user || (!isAdmin && !canManagerMute) || !post.authorId) return;
+    if (author?.role === 'admin' || (!isAdmin && author?.role === 'community_manager')) {
+      toast.error('Cannot mute an Admin or Manager');
+      return;
+    }
+    const nextBlocked = !author?.isBlocked;
+    try {
+      await updateDoc(doc(db, 'users', post.authorId), {
+        isBlocked: nextBlocked
+      });
+      setAuthor((prev: any) => prev ? { ...prev, isBlocked: nextBlocked } : prev);
+      if (!isAdmin && canManagerMute && profile) {
+        await logManagerAction({
+          managerId: user.uid,
+          managerName: profile.fullName || profile.username || 'Manager',
+          managerUsername: profile.username,
+          actionType: nextBlocked ? 'mute_user' : 'unmute_user',
+          targetId: post.authorId,
+          targetUserId: post.authorId,
+          targetUserName: author?.fullName || author?.username || 'Student',
+          targetSummary: `From post: ${(post.text || '').slice(0, 80)}`,
+          community: postCommunity,
+        });
+      }
+      toast.success(nextBlocked ? 'User muted from posting/commenting' : 'User unmuted');
+      setShowMenu(false);
+    } catch (err: any) {
+      console.error('Failed to update mute status', err?.message || 'Error');
+      toast.error('Failed to update user status');
     }
   };
 
@@ -340,9 +400,9 @@ const handleVote = async (optionId: string) => {
           <div className="flex items-center space-x-3">
             <button onClick={() => setShowProfileModal(true)} className="shrink-0 focus:outline-none transition-transform hover:scale-105 active:scale-95 relative">
               {author?.photoURL ? (
-                <img src={author.photoURL} alt={getFirstName(author.fullName)} className={`w-10 h-10 rounded-full object-cover ${author?.role === "admin" ? "border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : "border border-slate-200 dark:border-slate-700"}`} />
+                <img src={author.photoURL} alt={getFirstName(author.fullName)} className={`w-10 h-10 rounded-full object-cover ${author?.role === "admin" ? "border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : author?.role === "community_manager" ? "border-[2px] border-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" : "border border-slate-200 dark:border-slate-700"}`} />
               ) : (
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shadow-sm ${author?.role === "admin" ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"}`}>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shadow-sm ${author?.role === "admin" ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : author?.role === "community_manager" ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-[2px] border-emerald-500" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"}`}>
                   {getFirstName(author?.fullName)?.[0]?.toUpperCase() || 'U'}
                 </div>
               )}
@@ -358,6 +418,12 @@ const handleVote = async (optionId: string) => {
                 {author?.role === 'admin' && (
                   <span className="text-[10px] font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white px-1.5 py-0.5 rounded shadow-sm border border-cyan-400/50 uppercase tracking-wide">Admin</span>
                 )}
+                {author?.role === 'community_manager' && (
+                  <span className="text-[10px] font-bold bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-1.5 py-0.5 rounded shadow-sm border border-emerald-400/50 tracking-wide flex items-center gap-0.5">🛡️ Manager</span>
+                )}
+                {author?.isBlocked && (isAdmin || canManagerMute) && (
+                  <span className="text-[9px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded uppercase">Muted</span>
+                )}
               </div>
               <p className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
                 {post.createdAt?.toDate ? formatDistanceToNow(post.createdAt.toDate(), { addSuffix: true }).replace('about ', '') : 'just now'}
@@ -372,7 +438,7 @@ const handleVote = async (optionId: string) => {
                   <MoreVertical className="w-5 h-5" />
                 </button>
                 {showMenu && (
-                  <div className="absolute right-0 mt-2 w-36 bg-white dark:bg-slate-900 rounded-xl shadow-lg py-1 border border-slate-100 dark:border-slate-800 z-10">
+                  <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-900 rounded-xl shadow-lg py-1 border border-slate-100 dark:border-slate-800 z-10">
                     {isOwner && (
                       <button 
                         onClick={() => { setIsEditing(true); setShowMenu(false); }}
@@ -391,13 +457,22 @@ const handleVote = async (optionId: string) => {
                         {post.isPinned ? 'Unpin' : 'Pin'}
                       </button>
                     )}
-                    {(isOwner || isAdmin) && (
+                    {canDeletePost && (
                       <button 
                         onClick={() => { setShowDeleteConfirm(true); setShowMenu(false); }} 
                         className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center"
                       >
                         <Trash className="w-4 h-4 mr-2" />
-                        Delete
+                        Delete Post
+                      </button>
+                    )}
+                    {(isAdmin || canManagerMute) && post.authorId !== user.uid && author?.role !== 'admin' && (
+                      <button
+                        onClick={handleToggleMuteAuthor}
+                        className="w-full text-left px-4 py-2 text-sm text-amber-600 hover:bg-amber-50 flex items-center"
+                      >
+                        <Ban className="w-4 h-4 mr-2" />
+                        {author?.isBlocked ? 'Unmute User' : 'Mute User'}
                       </button>
                     )}
                     {!isOwner && !post.reportedBy?.includes(user.uid) && (

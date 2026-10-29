@@ -18,7 +18,8 @@ export default function AdminStatusRow() {
   const [viewCount, setViewCount] = useState<number | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const isAdmin = user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin';
+  const isSuperAdmin = user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin';
+  const isAdmin = isSuperAdmin || (profile?.role === 'community_manager' && !!profile?.managerPermissions?.canPostStatus);
 
   const fetchStatuses = async () => {
     if (!user) return;

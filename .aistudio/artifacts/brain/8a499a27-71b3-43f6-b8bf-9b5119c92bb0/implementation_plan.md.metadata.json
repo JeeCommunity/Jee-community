@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for optimizing Firestore quota usage with local caching and reduced write frequency in Study Hub and Firebase services.",
-  "updatedAt": "2026-10-07T04:59:53.815473859Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Manager AI Feature Studio & 2-Step Permission Sandbox Plan (in Simple Hinglish): Gives the Manager an AI Feature Builder inside /admin to create full interactive features (study tools, calculators, quizzes, flashcards, timers, custom sections, banners, polls) just like the Super Admin does via prompts, strictly controlled by a 2-step Super Admin approval system (Idea Permission -> Sandbox Build -> Live Preview & Final Deploy) with 1-Click Rollback.",
+  "updatedAt":  "2026-10-29T20:39:16.923137918Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }

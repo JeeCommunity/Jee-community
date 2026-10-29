@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { X, MessageCircle, ShieldAlert } from 'lucide-react';
+import { X, MessageCircle, ShieldAlert, Trash2 } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, query, orderBy, limit, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, addDoc, serverTimestamp, deleteDoc, doc } from 'firebase/firestore';
 import { getToxicWords } from '../lib/moderation';
+import { useAuth } from '../AuthContext';
+import { logManagerAction } from '../lib/managerLogs';
+import toast from 'react-hot-toast';
 
 interface AdminStudyGroupModalProps {
   group: any;
@@ -10,10 +13,39 @@ interface AdminStudyGroupModalProps {
 }
 
 export default function AdminStudyGroupModal({ group, onClose }: AdminStudyGroupModalProps) {
+  const { user, profile } = useAuth();
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [botMessage, setBotMessage] = useState("");
   const [sendingBot, setSendingBot] = useState(false);
+
+  const isSuperAdmin = user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin';
+  const canModerate = isSuperAdmin || (profile?.role === 'community_manager' && !!profile?.managerPermissions?.canModerateGroups);
+
+  const handleDeleteMessage = async (msg: any) => {
+    if (!canModerate || !group?.id) return;
+    try {
+      await deleteDoc(doc(db, 'study_groups', group.id, 'messages', msg.id));
+      setMessages(prev => prev.filter(m => m.id !== msg.id));
+      if (!isSuperAdmin && user && profile) {
+        await logManagerAction({
+          managerId: user.uid,
+          managerName: profile.fullName || profile.username || 'Manager',
+          managerUsername: profile.username,
+          actionType: 'delete_group_message',
+          targetId: msg.id,
+          targetUserId: msg.userId,
+          targetUserName: msg.userName || 'Student',
+          targetSummary: `Group ${group.name}: ${(msg.text || 'Media').slice(0, 80)}`,
+          community: profile.managerPermissions?.managedCommunity || 'JEE',
+        });
+      }
+      toast.success('Message deleted');
+    } catch (err) {
+      console.error('Error deleting group message:', err);
+      toast.error('Failed to delete message');
+    }
+  };
 
   const handleSendBotMessage = async (e) => {
     e.preventDefault();
@@ -148,6 +180,15 @@ export default function AdminStudyGroupModal({ group, onClose }: AdminStudyGroup
                   <span className="text-[10px] text-slate-500">
                     {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleString() : ''}
                   </span>
+                  {canModerate && (
+                    <button
+                      onClick={() => handleDeleteMessage(msg)}
+                      className="ml-auto p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Delete Message"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
                 {msg.imageUrl && (
                   <img src={msg.imageUrl} alt="attached" className="max-w-full rounded-lg mb-2" />

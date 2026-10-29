@@ -199,7 +199,6 @@ export default function Campus() {
       </div>
 
       <div className="px-4 md:px-10 pb-20 relative z-20 max-w-7xl mx-auto space-y-8 -mt-10">
-        
         {/* Next Milestone Card */}
         {nextCollege && (
            <div className="relative overflow-hidden bg-[#10172A] border border-[#1E293B] rounded-[24px] p-6 md:p-8 shadow-2xl">

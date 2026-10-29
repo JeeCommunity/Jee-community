@@ -373,7 +373,12 @@ export default function Layout() {
                 {isDropdownOpen && (
                   <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-lg py-1 border border-slate-200 dark:border-slate-700 transition-all">
                     <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800">
-                      <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{getFirstName(profile?.fullName) || 'User'}</p>
+                      <p className="text-sm font-medium text-slate-900 dark:text-white truncate flex items-center gap-1.5">
+                        <span>{getFirstName(profile?.fullName) || 'User'}</span>
+                        {profile?.role === 'community_manager' && (
+                          <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">🛡️ Manager</span>
+                        )}
+                      </p>
                       <p className="text-xs text-slate-500 dark:text-slate-400 truncate">@{profile?.username || 'setup_profile'}</p>
                     </div>
                     <button 
@@ -383,13 +388,13 @@ export default function Layout() {
                       <UserCircle className="w-4 h-4 mr-2" />
                       Edit Profile
                     </button>
-                    {user?.email === 'aistoryimage1999@gmail.com' && (
+                    {(user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin' || profile?.role === 'community_manager') && (
                       <button 
                         onClick={() => { setIsDropdownOpen(false); navigate('/admin'); }}
-                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center"
+                        className={`w-full text-left px-4 py-2 text-sm flex items-center font-medium ${profile?.role === 'community_manager' && user?.email !== 'aistoryimage1999@gmail.com' ? 'text-emerald-600 hover:bg-emerald-50' : 'text-red-600 hover:bg-red-50'}`}
                       >
                         <ShieldAlert className="w-4 h-4 mr-2" />
-                        Admin Panel
+                        {user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin' ? 'Admin Panel' : '🛡️ Manager Panel'}
                       </button>
                     )}
                     <button 
@@ -657,10 +662,10 @@ export default function Layout() {
                   <ExternalLink className="w-5 h-5" />
                   <span>Use Latest Version App</span>
                 </a>
-                {user?.email === 'aistoryimage1999@gmail.com' && (
-                  <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center space-x-3 px-3 py-3 text-red-600 hover:bg-red-50 rounded-lg font-medium transition-colors">
+                {(user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin' || profile?.role === 'community_manager') && (
+                  <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center space-x-3 px-3 py-3 rounded-lg font-medium transition-colors ${profile?.role === 'community_manager' && user?.email !== 'aistoryimage1999@gmail.com' ? 'text-emerald-600 hover:bg-emerald-50' : 'text-red-600 hover:bg-red-50'}`}>
                     <ShieldAlert className="w-5 h-5" />
-                    <span>Admin Panel</span>
+                    <span>{user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin' ? 'Admin Panel' : '🛡️ Manager Panel'}</span>
                   </Link>
                 )}
                 <button onClick={() => { setIsMobileMenuOpen(false); toggleTheme(); }} className="w-full flex items-center space-x-3 px-3 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 dark:bg-slate-800 rounded-lg font-medium transition-colors text-left">

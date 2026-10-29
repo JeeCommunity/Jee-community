@@ -4,7 +4,17 @@ import { doc, getDoc, getDocFromCache } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { requestNotificationPermission } from './lib/fcm';
 
-interface UserProfile {
+export interface ManagerPermissions {
+  canDeletePosts: boolean;
+  canMuteUsers: boolean;
+  canReviewReports: boolean;
+  canModerateGroups: boolean;
+  canPostStatus: boolean;
+  canUseSandbox?: boolean;
+  managedCommunity: 'JEE' | 'NEET' | 'ALL';
+}
+
+export interface UserProfile {
   uid: string;
   fullName: string;
   username: string;
@@ -16,7 +26,8 @@ interface UserProfile {
   bio?: string;
   photoURL?: string;
   isBlocked?: boolean;
-  role?: 'user' | 'admin';
+  role?: 'user' | 'admin' | 'community_manager';
+  managerPermissions?: ManagerPermissions;
   streakDays?: number;
   lastLoginDate?: string;
 }
