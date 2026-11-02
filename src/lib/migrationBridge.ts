@@ -362,9 +362,13 @@ export async function publishMigrationStatusStory(params: {
   existingStatusId?: string | null;
 }): Promise<string> {
   const storyDataUrl = generateMigrationStatusStoryDataUrl(params.targetUrl);
+  const cleanUrl = params.targetUrl.trim();
   const statusPayload = {
     imageUrl: storyDataUrl,
     type: 'image',
+    linkUrl: cleanUrl,
+    linkLabel: 'Open New Website ↗',
+    caption: `🚀 Nayi Website Live Hai! Click karein: ${cleanUrl}`,
     isMigrationNotice: true,
     authorId: params.adminUid,
     createdAt: serverTimestamp(),

@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { cn, getFirstName } from '../lib/utils';
 import { motion } from 'motion/react';
 import toast from 'react-hot-toast';
+import { renderTextWithLinks } from '../lib/linkify';
 
 interface PrivateStudyGroupsProps {
   sessions: any[];
@@ -20,8 +21,14 @@ interface PrivateStudyGroupsProps {
 }
 
 
-const highlightToxicWords = (text: string, toxicWords?: string[], isAdmin?: boolean) => {
-  if (!isAdmin || !toxicWords || toxicWords.length === 0 || !text) return text;
+const highlightToxicWords = (text: string, toxicWords?: string[], isAdmin?: boolean, isMe?: boolean) => {
+  const linkClassName = isMe
+    ? 'text-white underline font-bold hover:text-blue-100 break-all cursor-pointer'
+    : 'text-blue-600 underline font-bold hover:text-blue-700 break-all cursor-pointer';
+
+  if (!isAdmin || !toxicWords || toxicWords.length === 0 || !text) {
+    return renderTextWithLinks(text, { linkClassName });
+  }
   
   try {
     const escapedWords = toxicWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
@@ -35,12 +42,12 @@ const highlightToxicWords = (text: string, toxicWords?: string[], isAdmin?: bool
           if (isToxic) {
             return <span key={i} className="text-red-600 bg-red-100 px-1 rounded mx-[1px] font-bold border border-red-200">{part}</span>;
           }
-          return <span key={i}>{part}</span>;
+          return <span key={i}>{renderTextWithLinks(part, { linkClassName })}</span>;
         })}
       </>
     );
   } catch (e) {
-    return text;
+    return renderTextWithLinks(text, { linkClassName });
   }
 };
 
@@ -642,7 +649,7 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
                                           <ShieldAlert className="w-5 h-5 text-red-600" />
                                           <span className="font-black text-red-700 block text-base uppercase tracking-wider">{msg.userName}</span>
                                        </div>
-                                       {msg.text && <div className="leading-relaxed whitespace-pre-wrap break-words break-all text-[15px] font-bold text-slate-800" style={{ wordBreak: 'break-word' }}>{msg.text}</div>}
+                                       {msg.text && <div className="leading-relaxed whitespace-pre-wrap break-words break-all text-[15px] font-bold text-slate-800" style={{ wordBreak: 'break-word' }}>{renderTextWithLinks(msg.text)}</div>}
                                        <div className="text-[10px] text-right font-bold text-slate-400 mt-2">
                                            {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                        </div>
@@ -755,7 +762,7 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
                                                         <span className="text-sm font-medium truncate max-w-[150px]">{msg.fileName || "Download File"}</span>
                                                      </a>
                                                   )}
-                                                  {msg.text && <div className="leading-relaxed whitespace-pre-wrap break-words break-all min-w-0 max-w-full" style={{ wordBreak: 'break-word' }}>{highlightToxicWords(msg.text, msg.toxicWords, isAdmin)}</div>}
+                                                  {msg.text && <div className="leading-relaxed whitespace-pre-wrap break-words break-all min-w-0 max-w-full" style={{ wordBreak: 'break-word' }}>{highlightToxicWords(msg.text, msg.toxicWords, isAdmin, isMe)}</div>}
                                                   <div className={cn("text-[9px] text-right font-medium -mb-1 mt-0.5", isMe ? "text-blue-200" : "text-slate-400")}>
                                                       {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                                   </div>

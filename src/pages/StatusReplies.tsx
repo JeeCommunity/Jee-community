@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { MessageSquare, Heart, Video, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
+import { renderTextWithLinks } from '../lib/linkify';
 
 export default function StatusReplies() {
   const { user, profile } = useAuth();
@@ -119,7 +120,7 @@ export default function StatusReplies() {
                   {reply.type === 'reaction' ? (
                     <span className="text-2xl">{reply.content}</span>
                   ) : (
-                    <p className="text-sm break-words whitespace-pre-wrap min-w-0">{reply.content}</p>
+                    <p className="text-sm break-words whitespace-pre-wrap min-w-0">{renderTextWithLinks(reply.content)}</p>
                   )}
                 </div>
               </div>

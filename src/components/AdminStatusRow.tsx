@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, query, orderBy, getDocs, addDoc, serverTimestamp, deleteDoc, doc, limit, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Plus, X, Trash2, Eye } from 'lucide-react';
+import { Plus, X, Trash2, Eye, ExternalLink, Link as LinkIcon } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import toast from 'react-hot-toast';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { uploadFileToCloudinary } from '../lib/cloudinary';
+import { normalizeUrl, renderTextWithLinks } from '../lib/linkify';
 
 export default function AdminStatusRow() {
   const { user, profile } = useAuth();
@@ -17,6 +18,14 @@ export default function AdminStatusRow() {
   const [activeStatusIndex, setActiveStatusIndex] = useState<number | null>(null);
   const [videoProgress, setVideoProgress] = useState(0);
   const [viewCount, setViewCount] = useState<number | null>(null);
+
+  // Upload Preview Modal State
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
+  const [statusCaption, setStatusCaption] = useState('');
+  const [statusLinkUrl, setStatusLinkUrl] = useState('');
+  const [statusLinkLabel, setStatusLinkLabel] = useState('');
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isSuperAdmin = user?.email === 'aistoryimage1999@gmail.com' || profile?.role === 'admin';
@@ -101,6 +110,7 @@ export default function AdminStatusRow() {
     
     if (statuses.length >= 10) {
       toast.error("Maximum 10 statuses allowed. Please delete older ones.");
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
@@ -123,28 +133,71 @@ export default function AdminStatusRow() {
     // Max size 50MB for video to accommodate 720p 1 min video
     if (file.size > 50 * 1024 * 1024) {
       toast.error("File is too large (max 50MB)");
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
+    if (pendingPreviewUrl) {
+      URL.revokeObjectURL(pendingPreviewUrl);
+    }
+    setPendingFile(file);
+    setPendingPreviewUrl(URL.createObjectURL(file));
+    setStatusCaption('');
+    setStatusLinkUrl('');
+    setStatusLinkLabel('');
+    setIsUploadModalOpen(true);
+  };
+
+  const handleCancelUpload = () => {
+    if (pendingPreviewUrl) {
+      URL.revokeObjectURL(pendingPreviewUrl);
+    }
+    setPendingFile(null);
+    setPendingPreviewUrl(null);
+    setStatusCaption('');
+    setStatusLinkUrl('');
+    setStatusLinkLabel('');
+    setIsUploadModalOpen(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleConfirmUpload = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!pendingFile || !user || !isAdmin) return;
+
+    setIsUploadModalOpen(false);
     setIsUploading(true);
     setUploadProgress(0);
     
     try {
-      const url = await uploadFileToCloudinaryWithProgress(file);
+      const url = await uploadFileToCloudinaryWithProgress(pendingFile);
+      const normalizedLink = statusLinkUrl.trim() ? normalizeUrl(statusLinkUrl.trim()) : null;
       
       await addDoc(collection(db, 'admin_statuses'), {
         imageUrl: url,
-        type: file.type.startsWith('video/') ? 'video' : 'image',
+        type: pendingFile.type.startsWith('video/') ? 'video' : 'image',
+        caption: statusCaption.trim() || null,
+        linkUrl: normalizedLink,
+        linkLabel: statusLinkLabel.trim() || 'Open Link ↗',
         createdAt: serverTimestamp(),
         authorId: user.uid
       });
       toast.success("Status posted!");
+      await fetchStatuses();
     } catch (err) {
       console.error(err);
       toast.error("Failed to upload status");
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
+      if (pendingPreviewUrl) {
+        URL.revokeObjectURL(pendingPreviewUrl);
+      }
+      setPendingFile(null);
+      setPendingPreviewUrl(null);
+      setStatusCaption('');
+      setStatusLinkUrl('');
+      setStatusLinkLabel('');
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -264,6 +317,101 @@ export default function AdminStatusRow() {
       <div className="ml-auto shrink-0 flex items-center justify-end w-full overflow-hidden bg-transparent">
       </div>
 
+      {/* Upload Preview & Link/Caption Modal */}
+      <AnimatePresence>
+        {isUploadModalOpen && pendingFile && pendingPreviewUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[320] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={handleCancelUpload}
+          >
+            <div
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <h3 className="font-bold text-slate-900 dark:text-white text-base">Post Admin Status</h3>
+                <button
+                  type="button"
+                  onClick={handleCancelUpload}
+                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleConfirmUpload} className="p-4 space-y-4 overflow-y-auto">
+                <div className="w-full h-52 bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center border border-slate-200 dark:border-slate-800">
+                  {pendingFile.type.startsWith('video/') ? (
+                    <video src={pendingPreviewUrl} controls className="max-w-full max-h-full object-contain" />
+                  ) : (
+                    <img src={pendingPreviewUrl} alt="Status preview" className="max-w-full max-h-full object-contain" />
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase mb-1">
+                    Caption / Text (Optional - Links will be clickable)
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Write a caption or paste a link (e.g. https://jee-community.netlify.app)..."
+                    value={statusCaption}
+                    onChange={(e) => setStatusCaption(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-500 resize-none"
+                  />
+                </div>
+
+                <div className="p-3 rounded-xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/50 space-y-3">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
+                    <LinkIcon className="w-3.5 h-3.5" />
+                    <span>Add Clickable Link Button on Status (Optional)</span>
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Paste URL (e.g. https://jee-community.netlify.app/community)"
+                      value={statusLinkUrl}
+                      onChange={(e) => setStatusLinkUrl(e.target.value)}
+                      className="w-full rounded-lg border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  {statusLinkUrl.trim() && (
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Button Text (Default: Open Link ↗)"
+                        value={statusLinkLabel}
+                        onChange={(e) => setStatusLinkLabel(e.target.value)}
+                        className="w-full rounded-lg border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelUpload}
+                    className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-md shadow-blue-500/20"
+                  >
+                    Post Status
+                  </button>
+                </div>
+              </form>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Status Viewer */}
       <AnimatePresence>
         {activeStatusIndex !== null && statuses[activeStatusIndex] && (
@@ -279,6 +427,7 @@ export default function AdminStatusRow() {
                 const isActive = idx === activeStatusIndex;
                 const isPast = idx < activeStatusIndex;
                 const isVideo = status.type === 'video';
+                const hasExtraContent = !!(status.linkUrl || status.caption);
 
                 return (
                   <div key={status.id} className="h-1 flex-1 bg-white/30 dark:bg-slate-900/30 rounded-full overflow-hidden">
@@ -292,7 +441,7 @@ export default function AdminStatusRow() {
                         key={activeStatusIndex}
                         initial={{ width: isPast ? '100%' : '0%' }}
                         animate={{ width: isPast ? '100%' : isActive ? '100%' : '0%' }}
-                        transition={isActive ? { duration: 5, ease: 'linear' } : { duration: 0 }}
+                        transition={isActive ? { duration: hasExtraContent ? 8 : 5, ease: 'linear' } : { duration: 0 }}
                         onAnimationComplete={() => {
                           if (isActive && !isVideo) {
                             if (activeStatusIndex < statuses.length - 1) {
@@ -396,9 +545,37 @@ export default function AdminStatusRow() {
               />
             </div>
 
-            {/* Reply Bar */}
-            <div className="absolute bottom-4 left-4 right-4 z-20 flex flex-col gap-2">
-              <div className="flex justify-center gap-4 mb-2">
+            {/* Clickable Link Button & Caption + Reply Bar */}
+            <div
+              className="absolute bottom-4 left-4 right-4 z-30 flex flex-col gap-2.5 max-w-xl mx-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {statuses[activeStatusIndex].linkUrl && (
+                <div className="flex justify-center">
+                  <a
+                    href={normalizeUrl(statuses[activeStatusIndex].linkUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-extrabold text-sm shadow-[0_8px_25px_rgba(59,130,246,0.5)] border-2 border-white/30 active:scale-95 transition-all animate-bounce"
+                  >
+                    <span>{statuses[activeStatusIndex].linkLabel || 'Open Link ↗'}</span>
+                    <ExternalLink className="w-4 h-4 shrink-0" />
+                  </a>
+                </div>
+              )}
+
+              {statuses[activeStatusIndex].caption && (
+                <div className="bg-black/65 backdrop-blur-md border border-white/15 rounded-2xl px-4 py-2.5 text-center shadow-lg max-h-28 overflow-y-auto">
+                  <p className="text-white text-sm leading-relaxed whitespace-pre-wrap break-words">
+                    {renderTextWithLinks(statuses[activeStatusIndex].caption, {
+                      linkClassName: 'text-sky-300 hover:text-sky-200 underline font-extrabold break-all cursor-pointer',
+                    })}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-center gap-4 mb-1">
                 {['❤️', '😂', '😮', '😢', '🔥', '👏'].map(emoji => (
                   <button 
                     key={emoji}

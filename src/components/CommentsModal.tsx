@@ -25,6 +25,7 @@ import UserProfileModal from './UserProfileModal';
 import { createNotification } from '../lib/notifications';
 import toast from 'react-hot-toast';
 import { logManagerAction } from '../lib/managerLogs';
+import { renderTextWithLinks } from '../lib/linkify';
 
 interface Comment {
   id: string;
@@ -248,7 +249,7 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
             </div>
 
             <div className="mb-4">
-              <p className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{post.text}</p>
+              <p className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{renderTextWithLinks(post.text)}</p>
 
               {post.images && post.images.length > 0 && (
                 <div className={cn("mt-4 grid gap-2", post.images.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
@@ -682,7 +683,7 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
               <ShieldAlert className="w-4 h-4 text-red-600" />
               <span className="font-black text-red-700 block text-sm uppercase tracking-wider">Inspector Chulbul 👮‍♂️</span>
            </div>
-           {comment.text && <div className="leading-relaxed whitespace-pre-wrap break-words break-all text-[13px] font-bold text-slate-800" style={{ wordBreak: 'break-word' }}>{comment.text}</div>}
+           {comment.text && <div className="leading-relaxed whitespace-pre-wrap break-words break-all text-[13px] font-bold text-slate-800" style={{ wordBreak: 'break-word' }}>{renderTextWithLinks(comment.text)}</div>}
            <div className="flex justify-end mt-2">
              <button onClick={() => {if(canDelete) handleDelete();}} className="text-red-400 hover:text-red-600 text-xs flex items-center"><Trash className="w-3 h-3 mr-1"/> Delete</button>
            </div>
@@ -803,7 +804,7 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
               </div>
             </div>
           ) : (
-            <div><p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words">{comment.text}</p>
+            <div><p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words">{renderTextWithLinks(comment.text)}</p>
             {comment.imageUrl && (
               <div 
                 className="mt-2 relative rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 max-w-[200px] cursor-pointer"

@@ -6,6 +6,7 @@ import { getToxicWords } from '../lib/moderation';
 import { useAuth } from '../AuthContext';
 import { logManagerAction } from '../lib/managerLogs';
 import toast from 'react-hot-toast';
+import { renderTextWithLinks } from '../lib/linkify';
 
 interface AdminStudyGroupModalProps {
   group: any;
@@ -156,7 +157,7 @@ export default function AdminStudyGroupModal({ group, onClose }: AdminStudyGroup
                           <ShieldAlert className="w-5 h-5 text-red-600" />
                           <span className="font-black text-red-700 block text-base uppercase tracking-wider">{msg.userName}</span>
                        </div>
-                       {msg.text && <div className="leading-relaxed whitespace-pre-wrap break-words break-all text-[14px] font-bold text-slate-800" style={{ wordBreak: 'break-word' }}>{msg.text}</div>}
+                       {msg.text && <div className="leading-relaxed whitespace-pre-wrap break-words break-all text-[14px] font-bold text-slate-800" style={{ wordBreak: 'break-word' }}>{renderTextWithLinks(msg.text)}</div>}
                        <div className="text-[10px] text-right font-bold text-slate-400 mt-2">
                            {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                        </div>
@@ -194,7 +195,7 @@ export default function AdminStudyGroupModal({ group, onClose }: AdminStudyGroup
                   <img src={msg.imageUrl} alt="attached" className="max-w-full rounded-lg mb-2" />
                 )}
                 {msg.text && (
-                  <p className="text-slate-700 dark:text-slate-300 text-sm break-words whitespace-pre-wrap">{msg.text}</p>
+                  <p className="text-slate-700 dark:text-slate-300 text-sm break-words whitespace-pre-wrap">{renderTextWithLinks(msg.text)}</p>
                 )}
                 {msg.isToxic && msg.toxicWords && msg.toxicWords.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-red-100 dark:border-red-900/30 flex items-start gap-1.5">

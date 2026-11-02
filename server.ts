@@ -753,51 +753,74 @@ app.post('/api/admin/stats/:type/:action', async (req, res) => {
   }
 });
 
-app.post('/api/admin/send-reminders', async (req, res) => {
+const handleSendEmailReminders = async (req: express.Request, res: express.Response) => {
   try {
-    const { subject, message, actionUrl, actionText, testEmail } = req.body;
+    const { subject, message, actionUrl, actionText, testEmail, emails } = req.body;
 
     if (!subject || !message) {
       return res.status(400).json({ error: "Subject and message are required." });
     }
-    
-    const gmailUser = process.env.GMAIL_USER || 'jeecommunity.updates@gmail.com';
-    if (!process.env.GMAIL_APP_PASSWORD) {
-      return res.status(500).json({ error: "Server email app password is not configured." });
+
+    const rawResendKey =
+      process.env.RESEND_API_KEY ||
+      process.env.VITE_RESEND_API_KEY ||
+      process.env.RESEND_KEY ||
+      "";
+    const resendApiKey = rawResendKey.replace(/^["']|["']$/g, "").trim();
+
+    const rawResendFrom =
+      process.env.RESEND_FROM_EMAIL ||
+      process.env.VITE_RESEND_FROM_EMAIL ||
+      "JEE Community <onboarding@resend.dev>";
+    const cleanedFrom =
+      rawResendFrom.replace(/^["']|["']$/g, "").trim() ||
+      "JEE Community <onboarding@resend.dev>";
+    const resendFrom = cleanedFrom.includes("<")
+      ? cleanedFrom
+      : `JEE Community <${cleanedFrom}>`;
+
+    const gmailUser = (process.env.GMAIL_USER || "jeecommunity.updates@gmail.com").trim();
+    const gmailAppPassword = (process.env.GMAIL_APP_PASSWORD || "").replace(/[\s\u00A0-]/g, "");
+
+    if (!resendApiKey && !gmailAppPassword) {
+      return res.status(500).json({
+        error:
+          "RESEND_API_KEY is not configured. Please add RESEND_API_KEY in the AI Studio Environment Variables box or Netlify Environment Variables.",
+      });
     }
 
     let recipientEmails: string[] = [];
     if (testEmail) {
-      recipientEmails = [testEmail];
+      recipientEmails = [String(testEmail).trim()];
+    } else if (emails && Array.isArray(emails) && emails.length > 0) {
+      recipientEmails = [
+        ...new Set(
+          emails
+            .map((e: any) => String(e || "").trim())
+            .filter((e: string) => e && e.includes("@"))
+        ),
+      ];
     } else {
       try {
-        const db = getFirestore();
-        const usersSnap = await db.collection('users').get();
-        recipientEmails = usersSnap.docs
-          .map(doc => doc.data().email)
-          .filter((email: any) => email && typeof email === 'string' && email.includes('@'));
+        if (getApps().length > 0) {
+          const db = getFirestore();
+          const usersSnap = await db.collection("users").get();
+          recipientEmails = [
+            ...new Set(
+              usersSnap.docs
+                .map((doc) => String(doc.data().email || "").trim())
+                .filter((email: string) => email && email.includes("@"))
+            ),
+          ];
+        }
       } catch (dbErr) {
         console.error("Error fetching users from Firestore:", dbErr);
-        // Fallback to request body emails if provided
-        if (req.body.emails && Array.isArray(req.body.emails)) {
-          recipientEmails = req.body.emails;
-        }
       }
     }
 
     if (!recipientEmails || recipientEmails.length === 0) {
       return res.status(400).json({ error: "No recipient emails found." });
     }
-
-    const cleanedPassword = (process.env.GMAIL_APP_PASSWORD || "").replace(/[\s\u00A0-]/g, "");
-
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: gmailUser.trim(),
-        pass: cleanedPassword,
-      }
-    });
 
     const targetUrl = actionUrl || "https://jee-community.netlify.app";
     const targetText = actionText || "Open JEE Community App 🚀";
@@ -823,7 +846,7 @@ app.post('/api/admin/send-reminders', async (req, res) => {
 
           <!-- Body Content -->
           <div style="padding: 32px 28px; color: #1e293b; line-height: 1.7; font-size: 15px;">
-            <div style="white-space: pre-wrap; word-break: break-word;">${message.replace(/\n/g, '<br>')}</div>
+            <div style="white-space: pre-wrap; word-break: break-word;">${message.replace(/\n/g, "<br>")}</div>
 
             <!-- Action Button -->
             <div style="text-align: center; margin: 36px 0 20px;">
@@ -848,71 +871,245 @@ app.post('/api/admin/send-reminders', async (req, res) => {
       </html>
     `;
 
+    // Helper to send a single email via Resend API
+    const sendSingleResend = async (toAddress: string, customFrom?: string) => {
+      const sender = customFrom || resendFrom;
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: sender,
+          to: [toAddress],
+          subject,
+          html: htmlContent,
+        }),
+      });
+      const data: any = await response.json().catch(() => ({}));
+      if (
+        !response.ok &&
+        sender !== "JEE Community <onboarding@resend.dev>" &&
+        String(data?.message || "").toLowerCase().includes("domain")
+      ) {
+        return sendSingleResend(toAddress, "JEE Community <onboarding@resend.dev>");
+      }
+      return { ok: response.ok, status: response.status, data };
+    };
+
+    // 1. Primary Path: Resend API
+    if (resendApiKey) {
+      if (testEmail) {
+        const result = await sendSingleResend(testEmail);
+        if (result.ok) {
+          return res.json({
+            success: true,
+            provider: "resend",
+            message: `Test email sent via Resend to ${testEmail}!`,
+            id: result.data?.id,
+          });
+        }
+
+        const errMsg = result.data?.message || result.data?.error || "Resend API error";
+        // Check if Resend rejected because testEmail differs from Resend owner email on onboarding@resend.dev
+        const matchOwner = String(errMsg).match(/\(([^)]+@[^)]+)\)/);
+        if (matchOwner && matchOwner[1] && matchOwner[1].toLowerCase() !== testEmail.toLowerCase()) {
+          const retryOwner = await sendSingleResend(matchOwner[1]);
+          if (retryOwner.ok) {
+            return res.json({
+              success: true,
+              provider: "resend",
+              message: `Test email sent via Resend to your Resend-registered email (${matchOwner[1]})!`,
+              id: retryOwner.data?.id,
+            });
+          }
+        }
+
+        if (!gmailAppPassword) {
+          return res.status(result.status || 500).json({
+            error: `Resend Error: ${errMsg}`,
+          });
+        }
+      } else {
+        // Bulk Broadcast via Resend Batch API (chunks of 100)
+        let totalSent = 0;
+        let domainRestrictionMessage = "";
+        let activeSender = resendFrom;
+
+        for (let i = 0; i < recipientEmails.length; i += 100) {
+          const chunk = recipientEmails.slice(i, i + 100);
+          const batchPayload = chunk.map((emailAddr) => ({
+            from: activeSender,
+            to: [emailAddr],
+            subject,
+            html: htmlContent,
+          }));
+
+          let batchRes = await fetch("https://api.resend.com/emails/batch", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${resendApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(batchPayload),
+          });
+          let batchData: any = await batchRes.json().catch(() => ({}));
+
+          if (
+            !batchRes.ok &&
+            activeSender !== "JEE Community <onboarding@resend.dev>" &&
+            String(batchData?.message || "").toLowerCase().includes("domain")
+          ) {
+            activeSender = "JEE Community <onboarding@resend.dev>";
+            const retryPayload = chunk.map((emailAddr) => ({
+              from: activeSender,
+              to: [emailAddr],
+              subject,
+              html: htmlContent,
+            }));
+            batchRes = await fetch("https://api.resend.com/emails/batch", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${resendApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(retryPayload),
+            });
+            batchData = await batchRes.json().catch(() => ({}));
+          }
+
+          if (batchRes.ok) {
+            totalSent += chunk.length;
+          } else {
+            const msg = String(batchData?.message || batchData?.error || "");
+            if (msg.toLowerCase().includes("only send testing emails to your own email")) {
+              domainRestrictionMessage = msg;
+              const matchOwner = msg.match(/\(([^)]+@[^)]+)\)/);
+              if (matchOwner && matchOwner[1]) {
+                const singleRes = await sendSingleResend(matchOwner[1], activeSender);
+                if (singleRes.ok) totalSent += 1;
+              }
+              break;
+            } else if (!gmailAppPassword) {
+              return res.status(batchRes.status || 500).json({
+                error: `Resend Error: ${msg || "Failed to send batch emails"}`,
+              });
+            }
+          }
+        }
+
+        if (totalSent > 0 && !domainRestrictionMessage) {
+          return res.json({
+            success: true,
+            provider: "resend",
+            sentCount: totalSent,
+            message: `Resend broadcast sent successfully to ${totalSent} users! 🚀`,
+          });
+        }
+
+        if (domainRestrictionMessage && !gmailAppPassword) {
+          return res.json({
+            success: true,
+            provider: "resend",
+            sentCount: totalSent,
+            warning: domainRestrictionMessage,
+            message:
+              totalSent > 0
+                ? `Resend se aapke registered email par mail bhej diya gaya! (Sabhi students ko Resend se bhejne ke liye resend.com/domains par domain verify karein ya 'Open in Gmail App' button use karein).`
+                : `Resend Sandbox Limit: ${domainRestrictionMessage}`,
+          });
+        }
+      }
+    }
+
+    // 2. Fallback Path: Gmail SMTP via Nodemailer
+    if (!gmailAppPassword) {
+      return res.status(500).json({
+        error: "Neither a valid RESEND_API_KEY nor GMAIL_APP_PASSWORD could complete the delivery.",
+      });
+    }
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: gmailUser,
+        pass: gmailAppPassword,
+      },
+    });
+
     if (testEmail) {
       try {
         const mailOptions = {
-          from: '"JEE Community" <' + gmailUser + '>',
+          from: '"JEE Community" <' + gmailUser + ">",
           to: testEmail,
           subject: subject,
           html: htmlContent,
           headers: {
-            'X-Entity-Ref-ID': 'jee-community-broadcast',
-            'X-Mailer': 'JEE Community Mailer'
-          }
+            "X-Entity-Ref-ID": "jee-community-broadcast",
+            "X-Mailer": "JEE Community Mailer",
+          },
         };
         const info = await transporter.sendMail(mailOptions);
         console.log(`Test email sent successfully to ${testEmail}. Response:`, info.response);
-        return res.json({ success: true, message: `Test email sent successfully to ${testEmail}!` });
+        return res.json({
+          success: true,
+          provider: "gmail",
+          message: `Test email sent successfully to ${testEmail}!`,
+        });
       } catch (testErr: any) {
         console.error("Test email send failed:", testErr);
-        return res.status(500).json({ error: "Gmail SMTP Error: " + (testErr?.message || testErr) });
+        return res.status(500).json({ error: "Email Error: " + (testErr?.message || testErr) });
       }
     }
 
-    // Respond immediately for bulk broadcast
-    res.json({ success: true, message: `Email broadcast started for ${recipientEmails.length} users entirely from backend!` });
+    // Respond immediately for bulk broadcast via Gmail SMTP
+    res.json({
+      success: true,
+      provider: "gmail",
+      message: `Email broadcast started for ${recipientEmails.length} users from backend!`,
+    });
 
-    // Process bulk broadcast in background non-blocking
     setImmediate(async () => {
       try {
         let sentCount = 0;
-
         for (const recipientEmail of recipientEmails) {
-          if (!recipientEmail || !recipientEmail.includes('@')) continue;
-
+          if (!recipientEmail || !recipientEmail.includes("@")) continue;
           try {
             const mailOptions = {
-              from: '"JEE Community" <' + gmailUser + '>',
+              from: '"JEE Community" <' + gmailUser + ">",
               to: recipientEmail,
               subject: subject,
               html: htmlContent,
               headers: {
-                'X-Entity-Ref-ID': 'jee-community-broadcast',
-                'X-Mailer': 'JEE Community Mailer'
-              }
+                "X-Entity-Ref-ID": "jee-community-broadcast",
+                "X-Mailer": "JEE Community Mailer",
+              },
             };
-
             const info = await transporter.sendMail(mailOptions);
             sentCount += 1;
             console.log(`Backend direct email sent to ${recipientEmail}. Response:`, info.response);
           } catch (err: any) {
-            console.error(`Failed to send backend direct email to ${recipientEmail}:`, err?.message, err?.stack);
+            console.error(`Failed to send backend direct email to ${recipientEmail}:`, err?.message);
           }
-          await new Promise(r => setTimeout(r, 300));
+          await new Promise((r) => setTimeout(r, 300));
         }
         console.log(`Backend broadcast completed successfully to ${sentCount} users.`);
       } catch (bgErr) {
         console.error("Background email dispatch error:", bgErr);
       }
     });
-
   } catch (error: any) {
     console.error("Error initiating emails:", error);
     if (!res.headersSent) {
       res.status(500).json({ error: "Failed to send emails: " + error.message });
     }
   }
-});
+};
+
+app.post("/api/admin/send-reminders", handleSendEmailReminders);
+app.post("/api/send-email", handleSendEmailReminders);
+
 
 // Manager AI Feature Studio Endpoint (Sandbox Feature Builder)
 app.post('/api/sandbox/generate-feature', async (req, res) => {

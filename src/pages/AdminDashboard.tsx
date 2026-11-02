@@ -362,10 +362,10 @@ export default function AdminDashboard() {
   }) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const urlsToTry = [
-      'https://jee-community.onrender.com/api/admin/send-reminders',
-      `${origin}/api/admin/send-reminders`,
       '/api/admin/send-reminders',
-      'https://ais-pre-7z74mvln6wxh7omqrc72ca-806584178069.asia-southeast1.run.app/api/admin/send-reminders'
+      '/.netlify/functions/send-reminders',
+      ...(origin ? [`${origin}/api/admin/send-reminders`] : []),
+      'https://jee-community.onrender.com/api/admin/send-reminders',
     ];
 
     let lastErrorMsg = '';
@@ -394,17 +394,30 @@ export default function AdminDashboard() {
           return data;
         }
         if (data.error) {
-          throw new Error(data.error);
+          lastErrorMsg = data.error;
+          if (
+            lastErrorMsg.includes('RESEND_API_KEY') ||
+            lastErrorMsg.includes('Resend Error') ||
+            lastErrorMsg.includes('credentials') ||
+            lastErrorMsg.includes('Invalid')
+          ) {
+            break;
+          }
         }
       } catch (err: any) {
         lastErrorMsg = err?.message || 'Server error';
-        if (lastErrorMsg.includes('credentials') || lastErrorMsg.includes('Invalid')) {
-          throw new Error(lastErrorMsg);
-        }
       }
     }
 
-    // Graceful Fallback: If fetch fails due to CORS/network, automatically open Gmail with BCC and copy emails
+    if (
+      payload.testEmail ||
+      lastErrorMsg.includes('RESEND_API_KEY') ||
+      lastErrorMsg.includes('Resend Error')
+    ) {
+      throw new Error(lastErrorMsg || 'Could not send email via Resend API.');
+    }
+
+    // Graceful Fallback: If fetch fails due to network/unreachable server, open Gmail with BCC and copy emails
     try {
       const uniqueEmails = [...new Set(payload.emails)];
       const fullBody = `${payload.message}\n\n👉 Open Website: ${payload.actionUrl}`;
@@ -413,8 +426,8 @@ export default function AdminDashboard() {
       }
       const bccList = uniqueEmails.slice(0, 60).join(',');
       const mailtoUrl = `mailto:?bcc=${encodeURIComponent(bccList)}&subject=${encodeURIComponent(payload.subject)}&body=${encodeURIComponent(fullBody)}`;
-      window.open(mailtoUrl, '_blank');
-      return { success: true, fallback: true, count: payload.emails.length };
+      window.location.href = mailtoUrl;
+      return { success: true, fallback: true, count: uniqueEmails.length };
     } catch (fallbackErr) {
       throw new Error(lastErrorMsg || 'Could not connect to email delivery server');
     }
@@ -428,21 +441,27 @@ export default function AdminDashboard() {
     }
     
     setIsBroadcasting(true);
-    const toastId = toast.loading("Triggering server-side email broadcast...");
+    const toastId = toast.loading("Fetching student emails & sending broadcast via Resend...");
     
     try {
-      await sendBroadcastToServer({
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const fetchedEmails = usersSnap.docs
+        .map(doc => String(doc.data().email || '').trim())
+        .filter(email => email && email.includes('@'));
+      const uniqueEmails = [...new Set(fetchedEmails)];
+
+      const result = await sendBroadcastToServer({
         subject: broadcastSubject,
         message: broadcastMessage,
-        emails: [],
+        emails: uniqueEmails,
         actionUrl: broadcastActionUrl,
         actionText: broadcastActionText
       });
 
-      toast.success("Server-side email broadcast started successfully!", { id: toastId, duration: 6000 });
+      toast.success(result?.message || "Email broadcast sent successfully via Resend!", { id: toastId, duration: 7000 });
     } catch (err: any) {
       console.error("Broadcast error:", err);
-      toast.error(err.message || "Failed to send emails", { id: toastId, duration: 6000 });
+      toast.error(err.message || "Failed to send emails", { id: toastId, duration: 7000 });
     } finally {
       setIsBroadcasting(false);
     }
@@ -457,22 +476,22 @@ export default function AdminDashboard() {
     
     setIsTestingEmail(true);
     const testEmail = user?.email || 'aistoryimage1999@gmail.com';
-    const toastId = toast.loading(`Sending test email to ${testEmail} from server...`);
+    const toastId = toast.loading(`Sending test email to ${testEmail} via Resend...`);
     
     try {
-      await sendBroadcastToServer({
+      const result = await sendBroadcastToServer({
         subject: `[TEST] ${broadcastSubject}`,
         message: broadcastMessage,
-        emails: [],
+        emails: [testEmail],
         actionUrl: broadcastActionUrl,
         actionText: broadcastActionText,
         testEmail: testEmail
-      } as any);
+      });
 
-      toast.success(`Test email sent successfully from server to ${testEmail}!`, { id: toastId, duration: 6000 });
+      toast.success(result?.message || `Test email sent successfully to ${testEmail}!`, { id: toastId, duration: 7000 });
     } catch (err: any) {
       console.error("Test email error:", err);
-      toast.error(err.message || "Failed to send test email", { id: toastId, duration: 6000 });
+      toast.error(err.message || "Failed to send test email", { id: toastId, duration: 7000 });
     } finally {
       setIsTestingEmail(false);
     }

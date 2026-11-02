@@ -5,6 +5,7 @@ import { getCampusProgress, getCollegeLevelRequired, getCumulativeCoinsNeeded, g
 import { Building2, Zap } from "lucide-react";
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { renderTextWithLinks } from '../lib/linkify';
 
 interface UserProfileModalProps {
   user: any;
@@ -265,6 +266,11 @@ export default function UserProfileModal({ user, session: initialSession, onClos
               </div>
             )}
             <p className="text-center text-xs text-slate-500 dark:text-slate-400 font-medium">@{user.username}</p>
+            {user.bio && (
+              <p className="mt-2 text-center text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap break-words leading-relaxed px-2">
+                {renderTextWithLinks(user.bio)}
+              </p>
+            )}
           </div>
           
           <div className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-4 custom-scrollbar">
@@ -319,7 +325,7 @@ export default function UserProfileModal({ user, session: initialSession, onClos
                             <div className="w-3.5 h-3.5 rounded-full border border-slate-300 dark:border-slate-600 shrink-0 mr-1.5" />
                           )}
                           <span className={`truncate ${g.status !== 'pending' ? 'line-through text-slate-400' : isStudying && session.activeGoalId === g.id ? 'text-indigo-900 font-bold' : 'text-slate-700 dark:text-slate-300 font-medium'}`}>
-                            {g.text}
+                            {renderTextWithLinks(g.text)}
                           </span>
                         </div>
                         {(goalTime > 0 || (isStudying && session.activeGoalId === g.id)) && (

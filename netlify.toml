@@ -2,9 +2,24 @@
   command = "npm run build"
   publish = "dist"
 
+[functions]
+  directory = "netlify/functions"
+
 [build.environment]
   SECRETS_SCAN_ENABLED = "false"
-  SECRETS_SCAN_OMIT_KEYS = "VITE_FIREBASE_API_KEY,VITE_FIREBASE_AUTH_DOMAIN,VITE_FIREBASE_PROJECT_ID,VITE_FIREBASE_STORAGE_BUCKET,VITE_FIREBASE_MESSAGING_SENDER_ID,VITE_FIREBASE_APP_ID"
+  SECRETS_SCAN_OMIT_KEYS = "VITE_FIREBASE_API_KEY,VITE_FIREBASE_AUTH_DOMAIN,VITE_FIREBASE_PROJECT_ID,VITE_FIREBASE_STORAGE_BUCKET,VITE_FIREBASE_MESSAGING_SENDER_ID,VITE_FIREBASE_APP_ID,RESEND_API_KEY"
+
+[[redirects]]
+  from = "/api/admin/send-reminders"
+  to = "/.netlify/functions/send-reminders"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/send-email"
+  to = "/.netlify/functions/send-reminders"
+  status = 200
+  force = true
 
 [[redirects]]
   from = "/api/*"

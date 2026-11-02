@@ -8,6 +8,7 @@ import { db } from '../firebase';
 import { collection, addDoc, getDocs, getDoc, query, where, orderBy, serverTimestamp, doc, updateDoc, increment, deleteDoc } from 'firebase/firestore';
 import { uploadFileToCloudinary } from '../lib/cloudinary';
 import toast from 'react-hot-toast';
+import { renderTextWithLinks } from '../lib/linkify';
 
 const CATEGORIES = [
   { id: 'books', title: 'Books PDF', icon: BookOpen, desc: 'Textbooks, Reference Books' },
@@ -354,7 +355,7 @@ export default function NotesHub() {
                     </div>
                     <div>
                       <h4 className="font-bold text-slate-800 dark:text-slate-200 line-clamp-1">{note.title}</h4>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{note.description}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{renderTextWithLinks(note.description)}</p>
                     </div>
                   </div>
                   

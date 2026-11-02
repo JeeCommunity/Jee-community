@@ -8,6 +8,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { requestNotificationPermission } from '../lib/fcm';
 import { toast } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
+import { renderTextWithLinks } from '../lib/linkify';
 
 export default function NotificationsDropdown() {
   const navigate = useNavigate();
@@ -207,8 +208,8 @@ export default function NotificationsDropdown() {
                           {notif.type === 'cheer_clap' && 'cheered for your focus! 👏'}
                         </p>
                         <p className="text-slate-500 dark:text-slate-400 truncate mt-0.5 text-xs">
-                          {notif.type === 'like' && notif.postContent}
-                          {(notif.type === 'comment' || notif.type === 'reply') && notif.commentContent}
+                          {notif.type === 'like' && renderTextWithLinks(notif.postContent)}
+                          {(notif.type === 'comment' || notif.type === 'reply') && renderTextWithLinks(notif.commentContent)}
                           {notif.type === 'note_upload' && (
                             <span className="italic">"{notif.noteTitle}"</span>
                           )}

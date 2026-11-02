@@ -14,6 +14,7 @@ import toast from 'react-hot-toast';
 import { logManagerAction } from '../lib/managerLogs';
 
 import { createNotification } from '../lib/notifications';
+import { renderTextWithLinks } from '../lib/linkify';
 
 interface PostCardProps {
   post: any;
@@ -642,22 +643,9 @@ const handleVote = async (optionId: string) => {
           ) : (
             <>
               <p className="text-slate-800 dark:text-slate-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium">
-                {post.text?.split(/(https?:\/\/[^\s]+)/g).map((part: string, idx: number) =>
-                  /^https?:\/\/[^\s]+$/.test(part) ? (
-                    <a
-                      key={idx}
-                      href={part}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 underline font-bold hover:text-blue-700 break-all"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {part}
-                    </a>
-                  ) : (
-                    part
-                  )
-                )}
+                {renderTextWithLinks(post.text, {
+                  linkClassName: "text-blue-600 dark:text-blue-400 underline font-bold hover:text-blue-700 break-all cursor-pointer"
+                })}
               </p>
               
               {post.isToxic && post.toxicWords && post.toxicWords.length > 0 && (
