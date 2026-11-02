@@ -440,14 +440,31 @@ export default function AdminDashboard() {
       return;
     }
     
+    const isValidStudentEmail = (raw: any): boolean => {
+      const email = String(raw || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return false;
+      const domain = email.split('@')[1] || '';
+      const blockedDomains = [
+        'example.com',
+        'example.org',
+        'example.net',
+        'test.com',
+        'localhost',
+        'invalid',
+        'fake.com',
+        'dummy.com'
+      ];
+      return !blockedDomains.some(d => domain === d || domain.endsWith(`.${d}`));
+    };
+
     setIsBroadcasting(true);
     const toastId = toast.loading("Fetching student emails & sending broadcast via Resend...");
     
     try {
       const usersSnap = await getDocs(collection(db, 'users'));
       const fetchedEmails = usersSnap.docs
-        .map(doc => String(doc.data().email || '').trim())
-        .filter(email => email && email.includes('@'));
+        .map(doc => String(doc.data().email || '').trim().toLowerCase())
+        .filter(isValidStudentEmail);
       const uniqueEmails = [...new Set(fetchedEmails)];
 
       const result = await sendBroadcastToServer({
@@ -502,8 +519,8 @@ export default function AdminDashboard() {
     try {
       const usersSnap = await getDocs(collection(db, 'users'));
       const emails = usersSnap.docs
-        .map(doc => doc.data().email)
-        .filter(email => email && email.includes('@'));
+        .map(doc => String(doc.data().email || '').trim().toLowerCase())
+        .filter(email => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && !email.endsWith('@example.com') && !email.endsWith('@test.com'));
       
       const uniqueEmails = [...new Set(emails)];
       if (uniqueEmails.length === 0) {
@@ -513,7 +530,7 @@ export default function AdminDashboard() {
       
       const emailString = uniqueEmails.join(', ');
       await navigator.clipboard.writeText(emailString);
-      toast.success(`Copied ${uniqueEmails.length} student emails! Gmail BCC me paste karein. 📋`, { id: toastId, duration: 6000 });
+      toast.success(`Copied ${uniqueEmails.length} real student emails! Gmail BCC me paste karein. 📋`, { id: toastId, duration: 6000 });
     } catch (err: any) {
       toast.error("Failed to fetch emails: " + err.message, { id: toastId });
     }
@@ -524,8 +541,8 @@ export default function AdminDashboard() {
     try {
       const usersSnap = await getDocs(collection(db, 'users'));
       const emails = usersSnap.docs
-        .map(doc => doc.data().email)
-        .filter(email => email && email.includes('@'));
+        .map(doc => String(doc.data().email || '').trim().toLowerCase())
+        .filter(email => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && !email.endsWith('@example.com') && !email.endsWith('@test.com'));
       
       const uniqueEmails = [...new Set(emails)];
       const fullBody = `${broadcastMessage}\n\n👉 Open Website: ${broadcastActionUrl}`;

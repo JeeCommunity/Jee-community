@@ -789,15 +789,32 @@ const handleSendEmailReminders = async (req: express.Request, res: express.Respo
       });
     }
 
+    const isValidRecipientEmail = (raw: any): boolean => {
+      const email = String(raw || "").trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return false;
+      const domain = email.split("@")[1] || "";
+      const blockedDomains = [
+        "example.com",
+        "example.org",
+        "example.net",
+        "test.com",
+        "localhost",
+        "invalid",
+        "fake.com",
+        "dummy.com",
+      ];
+      return !blockedDomains.some((d) => domain === d || domain.endsWith(`.${d}`));
+    };
+
     let recipientEmails: string[] = [];
     if (testEmail) {
-      recipientEmails = [String(testEmail).trim()];
+      recipientEmails = [String(testEmail).trim().toLowerCase()].filter(isValidRecipientEmail);
     } else if (emails && Array.isArray(emails) && emails.length > 0) {
       recipientEmails = [
         ...new Set(
           emails
-            .map((e: any) => String(e || "").trim())
-            .filter((e: string) => e && e.includes("@"))
+            .map((e: any) => String(e || "").trim().toLowerCase())
+            .filter(isValidRecipientEmail)
         ),
       ];
     } else {
@@ -808,8 +825,8 @@ const handleSendEmailReminders = async (req: express.Request, res: express.Respo
           recipientEmails = [
             ...new Set(
               usersSnap.docs
-                .map((doc) => String(doc.data().email || "").trim())
-                .filter((email: string) => email && email.includes("@"))
+                .map((doc) => String(doc.data().email || "").trim().toLowerCase())
+                .filter(isValidRecipientEmail)
             ),
           ];
         }
@@ -819,7 +836,7 @@ const handleSendEmailReminders = async (req: express.Request, res: express.Respo
     }
 
     if (!recipientEmails || recipientEmails.length === 0) {
-      return res.status(400).json({ error: "No recipient emails found." });
+      return res.status(400).json({ error: "No valid recipient emails found." });
     }
 
     const targetUrl = actionUrl || "https://jee-community.netlify.app";
@@ -986,7 +1003,10 @@ const handleSendEmailReminders = async (req: express.Request, res: express.Respo
             totalSent += chunk.length;
           } else {
             const msg = String(batchData?.message || batchData?.error || "");
-            if (msg.toLowerCase().includes("only send testing emails to your own email")) {
+            if (
+              msg.toLowerCase().includes("only send testing emails to your own email") ||
+              msg.toLowerCase().includes("testing email address")
+            ) {
               domainRestrictionMessage = msg;
               const matchOwner = msg.match(/\(([^)]+@[^)]+)\)/);
               if (matchOwner && matchOwner[1]) {
@@ -1019,8 +1039,8 @@ const handleSendEmailReminders = async (req: express.Request, res: express.Respo
             warning: domainRestrictionMessage,
             message:
               totalSent > 0
-                ? `Resend se aapke registered email par mail bhej diya gaya! (Sabhi students ko Resend se bhejne ke liye resend.com/domains par domain verify karein ya 'Open in Gmail App' button use karein).`
-                : `Resend Sandbox Limit: ${domainRestrictionMessage}`,
+                ? `Resend se aapke registered email par mail bhej diya gaya! (Sabhi ${recipientEmails.length} students ko ek sath bhejne ke liye upar 'Open in Gmail App' use karein ya GMAIL_APP_PASSWORD add karein).`
+                : `Resend Free Mode: Bina custom domain verify kiye Resend sirf aapke khud ke email par bhejta hai. Sabhi ${recipientEmails.length} students ko bhejne ke liye upar 'Open in Gmail App 🚀' button dabaiye!`,
           });
         }
       }

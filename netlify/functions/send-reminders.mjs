@@ -78,15 +78,32 @@ export const handler = async (event) => {
       };
     }
 
+    const isValidRecipientEmail = (raw) => {
+      const email = String(raw || "").trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return false;
+      const domain = email.split("@")[1] || "";
+      const blockedDomains = [
+        "example.com",
+        "example.org",
+        "example.net",
+        "test.com",
+        "localhost",
+        "invalid",
+        "fake.com",
+        "dummy.com",
+      ];
+      return !blockedDomains.some((d) => domain === d || domain.endsWith(`.${d}`));
+    };
+
     let recipientEmails = [];
     if (testEmail) {
-      recipientEmails = [String(testEmail).trim()];
+      recipientEmails = [String(testEmail).trim().toLowerCase()].filter(isValidRecipientEmail);
     } else if (emails && Array.isArray(emails) && emails.length > 0) {
       recipientEmails = [
         ...new Set(
           emails
-            .map((e) => String(e || "").trim())
-            .filter((e) => e && e.includes("@"))
+            .map((e) => String(e || "").trim().toLowerCase())
+            .filter(isValidRecipientEmail)
         ),
       ];
     }
@@ -95,7 +112,7 @@ export const handler = async (event) => {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "No recipient emails found." }),
+        body: JSON.stringify({ error: "No valid recipient emails found." }),
       };
     }
 
@@ -271,7 +288,10 @@ export const handler = async (event) => {
             totalSent += chunk.length;
           } else {
             const msg = String(batchData?.message || batchData?.error || "");
-            if (msg.toLowerCase().includes("only send testing emails to your own email")) {
+            if (
+              msg.toLowerCase().includes("only send testing emails to your own email") ||
+              msg.toLowerCase().includes("testing email address")
+            ) {
               domainRestrictionMessage = msg;
               if (!gmailAppPassword) {
                 const matchOwner = msg.match(/\(([^)]+@[^)]+)\)/);
@@ -317,8 +337,8 @@ export const handler = async (event) => {
               warning: domainRestrictionMessage,
               message:
                 totalSent > 0
-                  ? `Resend se aapke registered email par mail bhej diya gaya! (Sabhi students ko Resend se bhejne ke liye resend.com/domains par domain verify karein ya GMAIL_USER + GMAIL_APP_PASSWORD use karein).`
-                  : `Resend Sandbox Limit: ${domainRestrictionMessage}`,
+                  ? `Resend se aapke registered email par mail bhej diya gaya! (Sabhi ${recipientEmails.length} students ko bhejne ke liye upar 'Open in Gmail App' use karein ya GMAIL_APP_PASSWORD add karein).`
+                  : `Resend Free Mode: Bina custom domain verify kiye Resend sirf aapke khud ke email par bhejta hai. Sabhi ${recipientEmails.length} students ko bhejne ke liye upar 'Open in Gmail App 🚀' button dabaiye!`,
             }),
           };
         }
