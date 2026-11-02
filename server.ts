@@ -883,6 +883,7 @@ const handleSendEmailReminders = async (req: express.Request, res: express.Respo
         body: JSON.stringify({
           from: sender,
           to: [toAddress],
+          reply_to: gmailUser,
           subject,
           html: htmlContent,
         }),
@@ -942,6 +943,7 @@ const handleSendEmailReminders = async (req: express.Request, res: express.Respo
           const batchPayload = chunk.map((emailAddr) => ({
             from: activeSender,
             to: [emailAddr],
+            reply_to: gmailUser,
             subject,
             html: htmlContent,
           }));
@@ -965,6 +967,7 @@ const handleSendEmailReminders = async (req: express.Request, res: express.Respo
             const retryPayload = chunk.map((emailAddr) => ({
               from: activeSender,
               to: [emailAddr],
+              reply_to: gmailUser,
               subject,
               html: htmlContent,
             }));

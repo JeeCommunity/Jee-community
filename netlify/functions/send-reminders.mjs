@@ -46,16 +46,26 @@ export const handler = async (event) => {
     const cleanedFrom =
       rawResendFrom.replace(/^["']|["']$/g, "").trim() ||
       "JEE Community <onboarding@resend.dev>";
-    const resendFrom = cleanedFrom.includes("<")
-      ? cleanedFrom
-      : `JEE Community <${cleanedFrom}>`;
 
-    const gmailUser = (process.env.GMAIL_USER || "jeecommunity.updates@gmail.com")
+    const gmailUser = (
+      process.env.GMAIL_USER ||
+      (cleanedFrom.toLowerCase().includes("@gmail.com")
+        ? cleanedFrom.replace(/.*<([^>]+)>.*/, "$1").trim()
+        : "jeecommunity.updates@gmail.com")
+    )
       .replace(/^["']|["']$/g, "")
       .trim();
     const gmailAppPassword = (process.env.GMAIL_APP_PASSWORD || "")
       .replace(/^["']|["']$/g, "")
       .replace(/[\s\u00A0-]/g, "");
+
+    // Resend does not allow @gmail.com as the "from" domain; fallback to onboarding@resend.dev and set reply_to
+    const safeFrom = cleanedFrom.toLowerCase().includes("@gmail.com")
+      ? "JEE Community <onboarding@resend.dev>"
+      : cleanedFrom;
+    const resendFrom = safeFrom.includes("<")
+      ? safeFrom
+      : `JEE Community <${safeFrom}>`;
 
     if (!resendApiKey && !gmailAppPassword) {
       return {
@@ -149,6 +159,7 @@ export const handler = async (event) => {
         body: JSON.stringify({
           from: sender,
           to: [toAddress],
+          reply_to: gmailUser,
           subject,
           html: htmlContent,
         }),
@@ -217,6 +228,7 @@ export const handler = async (event) => {
           const batchPayload = chunk.map((emailAddr) => ({
             from: activeSender,
             to: [emailAddr],
+            reply_to: gmailUser,
             subject,
             html: htmlContent,
           }));
@@ -240,6 +252,7 @@ export const handler = async (event) => {
             const retryPayload = chunk.map((emailAddr) => ({
               from: activeSender,
               to: [emailAddr],
+              reply_to: gmailUser,
               subject,
               html: htmlContent,
             }));
