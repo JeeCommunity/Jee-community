@@ -19,6 +19,7 @@ import { PrivacyPolicy, TermsOfService, Disclaimer } from './pages/Legal';
 import { About } from './pages/About';
 import ErrorNotes from './pages/ErrorNotes';
 import Whiteboard from './pages/Whiteboard';
+import SEOHead from './components/SEOHead';
 
 
 export default function App() {
@@ -49,6 +50,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <SEOHead />
       <ThemeProvider>
       <AuthProvider>
         <Toaster position="top-right" />

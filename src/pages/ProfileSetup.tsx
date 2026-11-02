@@ -5,6 +5,7 @@ import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase
 import { db } from '../firebase';
 import { useAuth } from '../AuthContext';
 import { Upload, Loader2, ChevronDown } from 'lucide-react';
+import { uploadFileToCloudinary } from '../lib/cloudinary';
 
 const INDIAN_STATES = [
   "Andaman and Nicobar Islands", "Andhra Pradesh", "Arunachal Pradesh", "Assam",
@@ -105,48 +106,33 @@ export default function ProfileSetup() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate size (e.g. max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Image must be less than 5MB');
+    if (!file.type.startsWith('image/')) {
+      setError('Please select a valid image file');
       return;
     }
 
-    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-    const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
-
-    if (!cloudName || !uploadPreset) {
-      setError('Cloudinary configuration is missing. Check .env');
+    // Validate size (max 10MB before automatic compression)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('Image must be less than 10MB');
       return;
     }
 
     setUploadingImage(true);
     setError('');
 
-    const uploadData = new FormData();
-    uploadData.append('file', file);
-    uploadData.append('upload_preset', uploadPreset);
-
     try {
-      let res;
-      try {
-        res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-          method: 'POST',
-          body: uploadData,
-        });
-      } catch (err: any) {
-        throw new Error('Network error (Failed to fetch). Please check if your Cloudinary variables are correct in Settings > Secrets, and disable any ad blockers.');
-      }
-      
-      const data = await res.json();
-      if (res.ok) {
-        setPhotoURL(data.secure_url);
-      } else {
-        throw new Error(data.error?.message || 'Failed to upload image');
-      }
+      const uploadedUrl = await uploadFileToCloudinary(file, {
+        maxDimension: 400,
+        quality: 0.8,
+      });
+      setPhotoURL(uploadedUrl);
     } catch (err: any) {
       setError(err.message || 'Error uploading image');
     } finally {
       setUploadingImage(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -161,7 +147,8 @@ export default function ProfileSetup() {
       return;
     }
 
-    if (formData.username.toLowerCase() === 'admin' || formData.fullName.toLowerCase().includes('admin')) {
+    const isSuperAdminEmail = user.email === 'aistoryimage1999@gmail.com';
+    if (!isSuperAdminEmail && (formData.username.toLowerCase() === 'admin' || formData.fullName.toLowerCase().includes('admin'))) {
       setError('You cannot use "Admin" in your username or full name.');
       return;
     }
@@ -197,12 +184,16 @@ export default function ProfileSetup() {
       const userRef = doc(db, 'users', String(user.uid));
       const userSnap = await Promise.race([getDoc(userRef), timeoutPromise]) as any;
       const isNewUser = !userSnap.exists();
+      const existingData = !isNewUser ? userSnap.data() : null;
+
+      const preservedRole = existingData?.role || profile?.role || (isSuperAdminEmail ? 'admin' : 'user');
+      const preservedCreatedAt = existingData?.createdAt || profile?.createdAt || new Date();
 
       await Promise.race([
         setDoc(userRef, {
           uid: String(user.uid),
           email: String(user.email || ''),
-          role: user.email === 'aistoryimage1999@gmail.com' ? 'admin' : 'user',
+          role: preservedRole,
           fullName: String(formData.fullName),
           username: String(formData.username),
           targetExam: String(formData.targetExam),
@@ -210,7 +201,8 @@ export default function ProfileSetup() {
           state: String(formData.state),
           bio: String(formData.bio),
           photoURL: photoURL ? String(photoURL) : null,
-          createdAt: new Date(),
+          createdAt: preservedCreatedAt,
+          updatedAt: new Date(),
         }, { merge: true }),
         timeoutPromise
       ]);

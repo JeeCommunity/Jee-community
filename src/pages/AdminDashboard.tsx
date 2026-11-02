@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { Navigate, Link } from 'react-router-dom';
 import { getFirstName, cn } from '../lib/utils';
 import AdminStudyGroupModal from '../components/AdminStudyGroupModal';
+import MigrationHubPanel from '../components/MigrationHubPanel';
 import { logManagerAction } from '../lib/managerLogs';
 
 const HRIZZZ_UID = 'sYoZnmiq0AavIUoocIwSuJcbuRD2';
@@ -102,7 +103,7 @@ export default function AdminDashboard() {
   const isManager = !isSuperAdmin && profile?.role === 'community_manager';
   const isAdmin = isSuperAdmin || isManager;
 
-  const [activeTab, setActiveTab] = useState<'managers' | 'posts' | 'users' | 'reports' | 'feedback' | 'beats' | 'groups' | 'broadcast' | 'github'>('managers');
+  const [activeTab, setActiveTab] = useState<'migration' | 'managers' | 'posts' | 'users' | 'reports' | 'feedback' | 'beats' | 'groups' | 'broadcast' | 'github'>('migration');
   const [broadcastSubject, setBroadcastSubject] = useState(BROADCAST_TEMPLATES[0].subject);
   const [broadcastMessage, setBroadcastMessage] = useState(BROADCAST_TEMPLATES[0].message);
   const [broadcastActionUrl, setBroadcastActionUrl] = useState(BROADCAST_TEMPLATES[0].actionUrl);
@@ -1146,6 +1147,19 @@ export default function AdminDashboard() {
 
       {/* Tabs */}
       <div className="flex gap-1.5 mb-6 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl flex-wrap overflow-x-auto">
+        {isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('migration')}
+            className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'migration'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100'
+            }`}
+          >
+            <Globe className="w-4 h-4" />
+            <span>🚀 Old-to-New Site Bridge</span>
+          </button>
+        )}
         {isSuperAdmin && (
           <button
             onClick={() => setActiveTab('managers')}
@@ -2481,6 +2495,12 @@ export default function AdminDashboard() {
               )}
             </div>
           </div>
+        ) : activeTab === 'migration' && isSuperAdmin ? (
+          <MigrationHubPanel
+            adminUid={user.uid}
+            adminAvatar={profile?.photoURL}
+            totalUsersCount={totalUsersCount || users.length}
+          />
         ) : null}
       </div>
 

@@ -6,6 +6,7 @@ import { useAuth } from '../AuthContext';
 import toast from 'react-hot-toast';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import { uploadFileToCloudinary } from '../lib/cloudinary';
 
 export default function AdminStatusRow() {
   const { user, profile } = useAuth();
@@ -25,7 +26,9 @@ export default function AdminStatusRow() {
     if (!user) return;
     const q = query(collection(db, 'admin_statuses'), orderBy('createdAt', 'desc'), limit(10));
     const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const data = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((s: any) => !s.isMigrationNotice);
     setStatuses(data);
   };
 
@@ -46,16 +49,18 @@ export default function AdminStatusRow() {
     });
   };
 
-  const uploadFileToCloudinaryWithProgress = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-      const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
-      
-      if (!cloudName || !uploadPreset) {
-        reject(new Error('Cloudinary configuration is missing.'));
-        return;
-      }
+  const uploadFileToCloudinaryWithProgress = async (file: File): Promise<string> => {
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+    
+    if (!cloudName || !uploadPreset) {
+      setUploadProgress(50);
+      const fallbackUrl = await uploadFileToCloudinary(file);
+      setUploadProgress(100);
+      return fallbackUrl;
+    }
 
+    return new Promise((resolve, reject) => {
       const url = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
       const xhr = new XMLHttpRequest();
       const fd = new FormData();
@@ -70,12 +75,17 @@ export default function AdminStatusRow() {
         }
       });
 
-      xhr.onreadystatechange = () => {
+      xhr.onreadystatechange = async () => {
         if (xhr.readyState === 4 && xhr.status === 200) {
           const response = JSON.parse(xhr.responseText);
           resolve(response.secure_url);
         } else if (xhr.readyState === 4) {
-          reject(new Error('Upload failed'));
+          try {
+            const fallbackUrl = await uploadFileToCloudinary(file);
+            resolve(fallbackUrl);
+          } catch (err) {
+            reject(err);
+          }
         }
       };
 

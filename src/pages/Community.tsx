@@ -11,6 +11,7 @@ import AdminStatusRow from '../components/AdminStatusRow';
 import CreatePostModal from '../components/CreatePostModal';
 import InstallAppButton from '../components/InstallAppButton';
 import { cn } from '../lib/utils';
+import { ensureMigrationPinnedAtTop } from '../lib/migrationBridge';
 
 const TAGS = ['All', 'Physics', 'Chemistry', 'Maths', 'Doubts', 'Notes', 'General'];
 
@@ -31,7 +32,7 @@ export default function Community() {
 
   const fetchPosts = async () => {
     if (!user) return;
-    const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(20));
+    const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(25));
     const snapshot = await getDocs(q);
     const postsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     setPosts(postsData);
@@ -39,6 +40,9 @@ export default function Community() {
 
   useEffect(() => {
     fetchPosts();
+    if (user) {
+      ensureMigrationPinnedAtTop();
+    }
   }, [user]);
 
   useEffect(() => {
@@ -71,6 +75,8 @@ export default function Community() {
   };
 
   const filteredPosts = posts.filter(p => {
+    // Hide old-site migration notice on the new website so new users get a clean feed
+    if (p.isMigrationNotice) return false;
     if (activeTab === 'mine' && p.authorId !== user.uid) return false;
     if (selectedTag !== 'All' && p.tag !== selectedTag) return false;
     if (searchQuery && !p.text?.toLowerCase().includes(searchQuery.toLowerCase())) return false;

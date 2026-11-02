@@ -33,6 +33,7 @@ export default function NotificationsDropdown() {
       
       snap.docs.forEach(doc => {
         const data = doc.data();
+        if (data.isMigrationNotice) return;
         notifs.push({ id: doc.id, ...data });
         if (!data.isRead) {
           unread++;
