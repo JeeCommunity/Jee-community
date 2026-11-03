@@ -5,7 +5,7 @@ import { auth, db } from '../firebase';
 import { doc, collection, query, where, getDoc, getCountFromServer, getDocs, onSnapshot, limit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useState, useRef, useEffect  , useMemo } from 'react';
-import { Trophy, MonitorPlay, StickyNote, FileText, Building2, MessageSquareQuote, Share2, Download, ExternalLink, BookOpen } from 'lucide-react';
+import { Trophy, MonitorPlay, StickyNote, FileText, Building2, MessageSquareQuote, Share2, Download, ExternalLink, BookOpen, PlaySquare } from 'lucide-react';
 import { usePWA } from '../hooks/usePWA';
 import FeedbackModal from './FeedbackModal';
 import WhatsNewModal from './WhatsNewModal';
@@ -33,6 +33,7 @@ export default function Layout() {
   const [showCalcTooltip, setShowCalcTooltip] = useState(false);
   const [showCalcBadge, setShowCalcBadge] = useState(false);
   const [showNotesBadge, setShowNotesBadge] = useState(false);
+  const [showEduTubeBadge, setShowEduTubeBadge] = useState(false);
 
   useEffect(() => {
     const clickedMenu = localStorage.getItem('hasClickedMenuForCalc');
@@ -42,6 +43,9 @@ export default function Layout() {
     
     const clickedNotes = localStorage.getItem('hasClickedNotesLink');
     if (!clickedNotes) setShowNotesBadge(true);
+
+    const clickedEduTube = localStorage.getItem('hasClickedEduTubeLink_v1');
+    if (!clickedEduTube) setShowEduTubeBadge(true);
   }, []);
 
   useEffect(() => {
@@ -242,7 +246,24 @@ export default function Layout() {
           </div>
           <div className="flex items-center space-x-1">
             <NotificationsDropdown />
-            
+            <Link
+              to="/edutube"
+              onClick={() => {
+                if (showEduTubeBadge) {
+                  setShowEduTubeBadge(false);
+                  localStorage.setItem('hasClickedEduTubeLink_v1', 'true');
+                }
+              }}
+              className="relative p-1.5 text-red-600 dark:text-red-400 hover:text-red-700 transition-colors rounded-full hover:bg-red-50 dark:hover:bg-slate-800"
+              title="EduTube Videos"
+            >
+              <PlaySquare className="w-5 h-5" />
+              {showEduTubeBadge && (
+                <span className="absolute -top-0.5 -right-0.5 px-1 py-0.2 bg-red-600 text-white text-[8px] font-bold rounded-full border border-white dark:border-slate-900 leading-tight">
+                  NEW
+                </span>
+              )}
+            </Link>
                 <Link to="/study-room" className="relative p-1.5 text-slate-500 dark:text-slate-400 hover:text-indigo-600 transition-colors rounded-full hover:bg-slate-50 dark:hover:bg-slate-800 dark:bg-slate-800 mr-2">
               <MonitorPlay className="w-5 h-5" />
               {activeStudentsCount > 0 && (
@@ -313,6 +334,26 @@ export default function Layout() {
                   <span className="absolute 1 top-0.5 right-0 flex h-2.5 w-2.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                  </span>
+                )}
+              </Link>
+
+              <Link 
+                to="/edutube"
+                onClick={() => {
+                  if (showEduTubeBadge) {
+                    setShowEduTubeBadge(false);
+                    localStorage.setItem('hasClickedEduTubeLink_v1', 'true');
+                  }
+                }}
+                className="px-3 py-2 text-slate-600 dark:text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-800 rounded-full transition-colors flex items-center gap-2 relative shrink-0 font-medium"
+                title="EduTube Video Hub"
+              >
+                <PlaySquare className="w-5 h-5 text-red-600 dark:text-red-500" />
+                <span className="hidden lg:inline">EduTube</span>
+                {showEduTubeBadge && (
+                  <span className="bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">
+                    New
                   </span>
                 )}
               </Link>
@@ -500,7 +541,7 @@ export default function Layout() {
         </div>
       </header>
 
-      <main className={`flex-1 max-w-4xl w-full mx-auto flex flex-col ${location.pathname === '/community' ? '' : 'p-4 md:p-6'}`}>
+      <main className={`flex-1 ${location.pathname === '/edutube' ? 'max-w-6xl' : 'max-w-4xl'} w-full mx-auto flex flex-col ${location.pathname === '/community' ? '' : 'p-4 md:p-6'}`}>
         <Outlet />
         {user && (
           <footer className="mt-auto pt-8 pb-6 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400">
@@ -520,8 +561,6 @@ export default function Layout() {
       <ShareAppModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} />
       <AITutorChat />
       <NotificationPromptModal />
-      <NotesHubAnnouncementModal />
-      <MyNotesAnnouncementModal />
 
       {/* Mobile Drawer Menu */}
       {isMobileMenuOpen && (
@@ -610,6 +649,27 @@ export default function Layout() {
                   <div className="flex items-center gap-2">
                     <span>Notes Hub</span>
                     {showNotesBadge && <span className="bg-green-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse shadow-sm">New</span>}
+                  </div>
+                </Link>
+                <Link
+                  to="/edutube"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    if (showEduTubeBadge) {
+                      setShowEduTubeBadge(false);
+                      localStorage.setItem('hasClickedEduTubeLink_v1', 'true');
+                    }
+                  }}
+                  className="flex items-center space-x-3 px-3 py-3 text-slate-700 dark:text-slate-300 hover:bg-red-50 hover:text-red-700 rounded-lg font-medium transition-colors"
+                >
+                  <PlaySquare className="w-5 h-5 text-red-600" />
+                  <div className="flex items-center gap-2">
+                    <span>EduTube Video Hub</span>
+                    {showEduTubeBadge && (
+                      <span className="bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse shadow-sm">
+                        New
+                      </span>
+                    )}
                   </div>
                 </Link>
                 <Link to="/error-notes" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center space-x-3 px-3 py-3 text-slate-700 dark:text-slate-300 hover:bg-red-50 hover:text-red-700 rounded-lg font-medium transition-colors">

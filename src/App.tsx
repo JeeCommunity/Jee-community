@@ -19,6 +19,7 @@ import { PrivacyPolicy, TermsOfService, Disclaimer } from './pages/Legal';
 import { About } from './pages/About';
 import ErrorNotes from './pages/ErrorNotes';
 import Whiteboard from './pages/Whiteboard';
+import EduTube from './pages/EduTube';
 import SEOHead from './components/SEOHead';
 
 
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="campus" element={<Campus />} />
             <Route path="calculator" element={<Calculator />} />
             <Route path="notes" element={<NotesHub />} />
+            <Route path="edutube" element={<EduTube />} />
             <Route path="error-notes" element={<ErrorNotes />} />
             <Route path="my-notes" element={<ErrorNotes />} />
             <Route path="whiteboard/:groupId" element={<Whiteboard />} />

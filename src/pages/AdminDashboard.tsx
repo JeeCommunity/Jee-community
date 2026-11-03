@@ -25,38 +25,65 @@ const DEFAULT_MANAGER_PERMISSIONS: ManagerPermissions = {
 
 const BROADCAST_TEMPLATES = [
   {
+    id: 'edutube-creator-launch',
+    title: '🎬 NEW LAUNCH: EduTube (Apna YouTube Channel Banao & Videos Upload Karo!)',
+    badge: 'New Launch 🔥',
+    subject: '🎬 Big Launch: EduTube is Live on JEE Community! Apna Channel Banao & Videos Dekho 🚀',
+    actionText: 'Open EduTube & Create Your Channel 🎬',
+    actionUrl: 'https://jee-community.netlify.app/edutube',
+    message: `Namaste JEE Champions & Creators! 🌟
+
+JEE Community platform par ek bohot bada aur exciting naya feature launch ho chuka hai — "EduTube (Creator & Video Hub)"! 🎬🔥
+
+Ab JEE Community par har student aur creator bilkul YouTube ki tarah apna khud ka channel bana sakta hai, videos upload kar sakta hai aur dusre channels ko subscribe kar sakta hai!
+
+✨ EduTube Me Kya-Kya Naya Hai:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📺 1. Create Your Own YouTube-Style Channel (@handle):
+Har user ab apna khud ka Channel Name, @handle, Bio, Channel Logo (DP), aur Wide Channel Banner customize kar sakta hai!
+
+🎥 2. Upload Long Videos & 60s Shorts:
+Apne problem solutions, study vlogs, quick revision tricks, strategy videos ya 60-second Shorts upload karein custom HD Thumbnail aur searchable #hashtags ke saath!
+
+🔔 3. Subscribe & Follow Official Channels:
+Official verified channel "JEE Community (@jeecommunity)" aur apne favourite creators ke channels ko Subscribe karein, videos Like, Save aur Comment karein!
+
+🔍 4. Smart #Hashtag Search:
+Kisi bhi #hashtag (#trending, #tricks, #vlog, #solution, #shorts) ya @channel ko ek click me search aur explore karein.
+
+Abhi neeche diye gaye button par click karke EduTube open karein, @jeecommunity ko subscribe karein aur apna khud ka channel banayein:`
+  },
+  {
     id: 'all-new-features',
-    title: '🚀 Mega Update: All New Features & Fast Web Link',
-    badge: 'Recommended',
-    subject: '🎉 Mega Update: New Features, Notes Hub & Fast Website Live! 🚀',
+    title: '🚀 Fresh All-in-One Update: EduTube + Notes Hub + Live Study Room',
+    badge: 'Fresh All-in-One',
+    subject: '🎉 Fresh Mega Update: EduTube Channels, Free Notes Hub & Live Study Room Live! 🚀',
     actionText: 'Open JEE Community App 🚀',
     actionUrl: 'https://jee-community.netlify.app',
     message: `Namaste JEE Aspirants! 🌟
 
-JEE Community platform par bohot saare naye aur exciting features launch ho chuke hain jo aapki JEE Main & Advanced preparation ko aur bhi aasaan aur superfast banayenge!
+JEE Community platform par naye aur fresh features launch ho chuke hain jo aapki preparation aur community experience ko next level par le jayenge!
 
-✨ Naye Features Ki Puri List:
+✨ Sabhi Naye & Fresh Features Ki List:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🌐 1. New Fast Website Link:
-Ab aap directly hamari official superfast website par bina kisi rukawat ke study kar sakte hain:
+🎬 1. NEW: EduTube (Creator Channels, Videos & Shorts):
+Ab aap JEE Community ke andar apna khud ka YouTube-style Channel (@handle) bana sakte hain, Long Videos & Shorts upload kar sakte hain, aur Official "JEE Community (@jeecommunity)" channel ko Subscribe kar sakte hain!
+👉 Direct Link: https://jee-community.netlify.app/edutube
+
+🌐 2. Superfast Official Website & App Install:
+Bina kisi rukawat ke study karein aur top menu me "Download Latest Version" par click karke app ko apne phone ki Home Screen par install karein:
 👉 https://jee-community.netlify.app
 
-📱 2. Download Latest Version (Home Screen Install):
-Website open karte hi top bar me "Download Latest Version" par click karein aur app ko direct apne phone ki Home Screen par install karein — bilkul native app ki tarah fast, clean aur ad-free!
+📚 3. Smart Notes Hub & Formula Sheets:
+Physics, Chemistry aur Mathematics ke handwritten notes, books, chapter-wise formula sheets aur PYQs ab ek click me free available hain.
 
-📚 3. Notes Hub & Formula Sheets:
-Physics, Chemistry aur Mathematics ke top toppers ke handwritten notes, chapter-wise formula cheat sheets aur revision material ab ek click me available hain.
+👥 4. Live Video Study Rooms & Whiteboard:
+Apne friends aur serious aspirants ke sath live video study room join karein, real-time collaborative whiteboard par doubts solve karein aur Pomodoro timer ke sath focus karein.
 
-💡 4. AI Doubt Solving & Clean KaTeX Math:
-Complex numericals, calculus formulas aur reaction mechanisms ab crystal-clear KaTeX format me solve honge. AI Solve button se instant step-by-step guidance payein!
+📕 5. Personal Error Notes & JEE Rank Calculator:
+Apni mock test mistakes ko Error Notes me save karein aur JEE Calculator se apna percentile & rank check karein.
 
-👥 5. Live Study Rooms & Group Discussions:
-Apne friends aur serious aspirants ke sath milkar live self-study room join karein, timer lagakar padhai karein aur doubts instantly discuss karein.
-
-⚡ 6. Levels, Badges & Streaks:
-Doubt solve karke points aur Level up (Lvl 11+) karein! Community leaderboard me apna rank banayein aur regular study streak maintain karein.
-
-Abhi neeche diye gaye button par click karke naye features explore karein aur apni study start karein:`
+Abhi neeche diye gaye button par click karke sabhi fresh features explore karein:`
   },
   {
     id: 'doubts-session',

@@ -9,12 +9,18 @@ import { requestNotificationPermission } from '../lib/fcm';
 import { toast } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { renderTextWithLinks } from '../lib/linkify';
+import { JEE_COMMUNITY_OFFICIAL_LOGO_URL } from '../lib/edutube';
+
+const EDUTUBE_BELL_NOTIF_KEY = 'hasReadEduTubeBellNotif_2026_v1';
 
 export default function NotificationsDropdown() {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [hasReadEduTubeNotif, setHasReadEduTubeNotif] = useState<boolean>(() =>
+    Boolean(localStorage.getItem(EDUTUBE_BELL_NOTIF_KEY))
+  );
   const [pushEnabled, setPushEnabled] = useState(Notification.permission === 'granted');
   const { user, profile } = useAuth();
 
@@ -63,10 +69,12 @@ export default function NotificationsDropdown() {
     
     setIsOpen(false);
     
-    if (notif.type === 'live_study') {
+    if (notif.type === 'edutube_launch' || notif.type === 'admin_broadcast') {
+      navigate(notif.targetUrl || '/edutube');
+    } else if (notif.type === 'live_study') {
       navigate('/study-room');
     } else if (notif.type === 'note_upload') {
-      navigate('/notes-hub');
+      navigate('/notes');
     } else if (notif.type === 'like' || notif.type === 'comment' || notif.type === 'reply') {
       if (notif.postId) {
         navigate(`/community?postId=${notif.postId}`);
@@ -74,6 +82,13 @@ export default function NotificationsDropdown() {
         navigate('/community');
       }
     }
+  };
+
+  const handleEduTubeFeatureClick = () => {
+    localStorage.setItem(EDUTUBE_BELL_NOTIF_KEY, 'true');
+    setHasReadEduTubeNotif(true);
+    setIsOpen(false);
+    navigate('/edutube');
   };
 
   const handleClearAll = async () => {
@@ -120,7 +135,7 @@ export default function NotificationsDropdown() {
         className="relative p-1.5 text-slate-500 dark:text-slate-400 hover:text-blue-600 transition-colors rounded-full hover:bg-slate-50 dark:hover:bg-slate-800 dark:bg-slate-800 focus:outline-none"
       >
         <Bell className="w-5 h-5" />
-        {unreadCount > 0 && (
+        {(unreadCount > 0 || !hasReadEduTubeNotif) && (
           <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
         )}
       </button>
@@ -174,12 +189,44 @@ export default function NotificationsDropdown() {
               </div>
             )}
             
-            <div className="overflow-y-auto flex-1 p-2">
-              {notifications.length === 0 ? (
-                <div className="py-8 text-center text-slate-500 dark:text-slate-400 text-sm">
-                  No notifications yet
+            <div className="overflow-y-auto flex-1 p-2 space-y-1">
+              {/* Built-in New Feature Notification for All Old & New Users (0 Firebase Reads) */}
+              <div
+                onClick={handleEduTubeFeatureClick}
+                className={cn(
+                  "p-3 rounded-lg text-sm transition-colors cursor-pointer flex items-start space-x-3",
+                  hasReadEduTubeNotif
+                    ? "hover:bg-slate-50 dark:hover:bg-slate-800 bg-white dark:bg-slate-900"
+                    : "bg-red-50/70 dark:bg-red-950/30 hover:bg-red-50 dark:hover:bg-red-950/50 border border-red-200/70 dark:border-red-900/50"
+                )}
+              >
+                <img
+                  src={JEE_COMMUNITY_OFFICIAL_LOGO_URL}
+                  alt="JEE Community"
+                  className="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-slate-200 dark:border-slate-700"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-slate-900 dark:text-white text-xs">
+                      JEE Community
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold uppercase">
+                      New Feature
+                    </span>
+                  </div>
+                  <p className="text-slate-700 dark:text-slate-300 text-xs mt-1 leading-relaxed">
+                    🎬 <strong>EduTube Creator Hub is Live!</strong> Apna khud ka YouTube-style channel banayein, Videos &amp; Shorts upload karein aur <strong>@jeecommunity</strong> ko subscribe karein!
+                  </p>
+                  <p className="text-[10px] text-red-600 dark:text-red-400 font-semibold mt-1">
+                    Tap to open EduTube &rarr;
+                  </p>
                 </div>
-              ) : (
+                {!hasReadEduTubeNotif && (
+                  <div className="w-2 h-2 bg-red-600 rounded-full mt-1.5 flex-shrink-0"></div>
+                )}
+              </div>
+
+              {notifications.length > 0 && (
                 <div className="space-y-1">
                   {notifications.map((notif) => (
                     <div 
@@ -206,10 +253,12 @@ export default function NotificationsDropdown() {
                           {notif.type === 'note_upload' && 'dropped some new knowledge. 📚'}
                           {notif.type === 'cheer_fire' && 'cheered for your focus! 🔥'}
                           {notif.type === 'cheer_clap' && 'cheered for your focus! 👏'}
+                          {(notif.type === 'admin_broadcast' || notif.type === 'edutube_launch') && 'announced a new feature! 🚀'}
                         </p>
                         <p className="text-slate-500 dark:text-slate-400 truncate mt-0.5 text-xs">
                           {notif.type === 'like' && renderTextWithLinks(notif.postContent)}
                           {(notif.type === 'comment' || notif.type === 'reply') && renderTextWithLinks(notif.commentContent)}
+                          {(notif.type === 'admin_broadcast' || notif.type === 'edutube_launch') && renderTextWithLinks(notif.postContent || notif.message)}
                           {notif.type === 'note_upload' && (
                             <span className="italic">"{notif.noteTitle}"</span>
                           )}

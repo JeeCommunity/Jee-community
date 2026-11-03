@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 400" width="1600" height="400">
+  <defs>
+    <linearGradient id="bannerBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#050811" />
+      <stop offset="45%" stop-color="#0B132B" />
+      <stop offset="100%" stop-color="#17153B" />
+    </linearGradient>
+    <radialGradient id="glowLeft" cx="20%" cy="50%" r="48%">
+      <stop offset="0%" stop-color="#2563EB" stop-opacity="0.34" />
+      <stop offset="100%" stop-color="#2563EB" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowRight" cx="85%" cy="45%" r="45%">
+      <stop offset="0%" stop-color="#EF4444" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#EF4444" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="bookLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#1E40AF" />
+    </linearGradient>
+    <linearGradient id="bookRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60A5FA" />
+      <stop offset="100%" stop-color="#3B82F6" />
+    </linearGradient>
+    <linearGradient id="accentLine" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3B82F6" />
+      <stop offset="50%" stop-color="#60A5FA" />
+      <stop offset="100%" stop-color="#EF4444" />
+    </linearGradient>
+  </defs>
+
+  <!-- Deep Obsidian & Midnight Indigo Base -->
+  <rect width="1600" height="400" fill="url(#bannerBg)" />
+  <rect width="1600" height="400" fill="url(#glowLeft)" />
+  <rect width="1600" height="400" fill="url(#glowRight)" />
+
+  <!-- Architectural Precision Grid -->
+  <g stroke="#ffffff" stroke-opacity="0.045" stroke-width="1.5">
+    <line x1="0" y1="80" x2="1600" y2="80" />
+    <line x1="0" y1="160" x2="1600" y2="160" />
+    <line x1="0" y1="240" x2="1600" y2="240" />
+    <line x1="0" y1="320" x2="1600" y2="320" />
+    <line x1="260" y1="0" x2="260" y2="400" />
+    <line x1="520" y1="0" x2="520" y2="400" />
+    <line x1="780" y1="0" x2="780" y2="400" />
+    <line x1="1040" y1="0" x2="1040" y2="400" />
+    <line x1="1300" y1="0" x2="1300" y2="400" />
+  </g>
+
+  <!-- Subtle Decorative Trajectory Curve -->
+  <path d="M 980 380 Q 1240 120 1580 60" fill="none" stroke="url(#accentLine)" stroke-opacity="0.28" stroke-width="4" stroke-dasharray="10 8" />
+  <path d="M 1060 400 Q 1310 180 1600 130" fill="none" stroke="#3B82F6" stroke-opacity="0.18" stroke-width="2" />
+
+  <!-- Left Brand Emblem Container -->
+  <g transform="translate(88, 76)">
+    <rect x="0" y="0" width="248" height="248" rx="56" fill="#090D16" fill-opacity="0.88" stroke="#3B82F6" stroke-opacity="0.45" stroke-width="3" />
+    <g transform="translate(22, 16) scale(0.8)">
+      <!-- Left Page -->
+      <path d="M 128 224 C 96 224, 48 200, 32 176 L 32 80 C 48 104, 96 128, 128 128 Z" fill="url(#bookLeft)" />
+      <!-- Right Page -->
+      <path d="M 128 224 C 160 224, 208 200, 224 176 L 224 80 C 208 104, 160 128, 128 128 Z" fill="url(#bookRight)" />
+      <!-- Big Star -->
+      <path d="M 128 16 Q 128 64 176 64 Q 128 64 128 112 Q 128 64 80 64 Q 128 64 128 16 Z" fill="#3B82F6" />
+      <!-- Small Star -->
+      <path d="M 184 20 Q 184 40 204 40 Q 184 40 184 60 Q 184 40 164 40 Q 184 40 184 20 Z" fill="#93C5FD" />
+    </g>
+  </g>
+
+  <!-- Center-Left Main Typography -->
+  <g transform="translate(376, 0)">
+    <!-- Top Official Pill -->
+    <rect x="0" y="84" width="296" height="36" rx="18" fill="#1E293B" fill-opacity="0.9" stroke="#3B82F6" stroke-opacity="0.45" stroke-width="1.5" />
+    <circle cx="22" cy="102" r="5" fill="#EF4444" />
+    <text x="38" y="108" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="700" fill="#93C5FD" letter-spacing="1.5">OFFICIAL EDUTUBE CHANNEL</text>
+
+    <!-- Channel Title -->
+    <text x="0" y="196" font-family="Plus Jakarta Sans, Inter, system-ui, sans-serif" font-size="68" font-weight="900" fill="#F8FAFC" letter-spacing="-1">JEE Community</text>
+
+    <!-- Verified Check Badge Next to Title -->
+    <g transform="translate(535, 146)">
+      <circle cx="22" cy="22" r="19" fill="#3B82F6" />
+      <path d="M 14 22.5 L 19.5 28 L 30.5 16.5" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <!-- Subtitle / Tagline -->
+    <text x="0" y="246" font-family="Plus Jakarta Sans, Inter, system-ui, sans-serif" font-size="25" font-weight="600" fill="#CBD5E1">India&apos;s Fastest Growing Student &amp; Creator Video Network</text>
+
+    <!-- Bottom Feature Tags -->
+    <g transform="translate(0, 276)">
+      <rect x="0" y="0" width="168" height="38" rx="10" fill="#0F172A" stroke="#334155" stroke-width="1.5" />
+      <text x="84" y="24" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="#60A5FA" text-anchor="middle">@jeecommunity</text>
+
+      <rect x="184" y="0" width="176" height="38" rx="10" fill="#0F172A" stroke="#334155" stroke-width="1.5" />
+      <text x="272" y="24" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="#F8FAFC" text-anchor="middle">#videos · #shorts</text>
+
+      <rect x="376" y="0" width="234" height="38" rx="10" fill="#0F172A" stroke="#334155" stroke-width="1.5" />
+      <text x="493" y="24" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="#F87171" text-anchor="middle">SUBSCRIBE FOR UPDATES</text>
+    </g>
+  </g>
+
+  <!-- Bottom Accent Bar -->
+  <rect x="0" y="394" width="1600" height="6" fill="url(#accentLine)" />
+</svg>

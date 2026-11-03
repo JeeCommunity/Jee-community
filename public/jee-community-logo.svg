@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#060B19" />
+      <stop offset="50%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#1E1B4B" />
+    </linearGradient>
+    <radialGradient id="blueGlow" cx="50%" cy="38%" r="55%">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.45" />
+      <stop offset="60%" stop-color="#2563EB" stop-opacity="0.12" />
+      <stop offset="100%" stop-color="#1D4ED8" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="rimGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60A5FA" />
+      <stop offset="50%" stop-color="#3B82F6" />
+      <stop offset="100%" stop-color="#EF4444" />
+    </linearGradient>
+    <linearGradient id="leftPage" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#1E40AF" />
+    </linearGradient>
+    <linearGradient id="rightPage" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60A5FA" />
+      <stop offset="100%" stop-color="#3B82F6" />
+    </linearGradient>
+    <linearGradient id="starGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#93C5FD" />
+      <stop offset="50%" stop-color="#3B82F6" />
+      <stop offset="100%" stop-color="#2563EB" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Circle Badge -->
+  <circle cx="256" cy="256" r="248" fill="url(#bgGrad)" stroke="url(#rimGrad)" stroke-width="12" />
+  <circle cx="256" cy="256" r="228" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2" />
+  <circle cx="256" cy="256" r="236" fill="url(#blueGlow)" />
+
+  <!-- Subtle Blueprint Grid Lines -->
+  <g stroke="#ffffff" stroke-opacity="0.05" stroke-width="1.5">
+    <line x1="80" y1="256" x2="432" y2="256" />
+    <line x1="256" y1="80" x2="256" y2="432" />
+  </g>
+
+  <!-- Official JEE Community Open Book + Rising Stars Emblem (Scaled & Centered) -->
+  <g transform="translate(64, 46) scale(1.5)">
+    <!-- Left Page -->
+    <path d="M 128 214 C 96 214, 48 190, 32 166 L 32 76 C 48 100, 96 124, 128 124 Z" fill="url(#leftPage)" />
+    <!-- Right Page -->
+    <path d="M 128 214 C 160 214, 208 190, 224 166 L 224 76 C 208 100, 160 124, 128 124 Z" fill="url(#rightPage)" />
+    <!-- Center Spine Highlight -->
+    <line x1="128" y1="122" x2="128" y2="214" stroke="#93C5FD" stroke-width="3" stroke-linecap="round" />
+    <!-- Big Rising Star -->
+    <path d="M 128 14 Q 128 62 176 62 Q 128 62 128 110 Q 128 62 80 62 Q 128 62 128 14 Z" fill="url(#starGrad)" />
+    <!-- Small Rising Star -->
+    <path d="M 184 18 Q 184 38 204 38 Q 184 38 184 58 Q 184 38 164 38 Q 184 38 184 18 Z" fill="#93C5FD" />
+  </g>
+
+  <!-- Bottom Pill Tag: JEE COMMUNITY -->
+  <rect x="116" y="394" width="280" height="44" rx="22" fill="#090D16" fill-opacity="0.9" stroke="#3B82F6" stroke-opacity="0.5" stroke-width="2" />
+  <circle cx="148" cy="416" r="7" fill="#EF4444" />
+  <text x="266" y="423" font-family="Plus Jakarta Sans, Inter, system-ui, sans-serif" font-size="21" font-weight="800" fill="#F8FAFC" letter-spacing="1.5" text-anchor="middle">JEE COMMUNITY</text>
+</svg>
