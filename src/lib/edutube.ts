@@ -1,4 +1,4 @@
-export type VideoFormat = 'long' | 'short';
+export type VideoFormat = 'long' | 'short' | 'live';
 export type StorageProviderType = 'supabase' | 'imagekit' | 'external' | 'local';
 
 export interface EduTubeComment {
@@ -453,8 +453,13 @@ function normalizeVideoRow(r: any): EduTubeVideo {
     thumbnail_url:
       r.thumbnail_url ||
       createCustomBannerThumbnail(r.title || 'EduTube Video', tags.slice(0, 3).join(' · ')),
-    duration: r.duration || '05:00',
-    video_type: r.video_type === 'short' ? 'short' : 'long',
+    duration: r.duration || (r.video_type === 'live' ? 'LIVE' : '05:00'),
+    video_type:
+      r.video_type === 'short'
+        ? 'short'
+        : r.video_type === 'live'
+        ? 'live'
+        : 'long',
     tags,
     author_uid: r.author_uid || 'anonymous',
     author_name: r.author_name || 'Creator',
@@ -613,7 +618,7 @@ export async function fetchEduTubeData(): Promise<{
   if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
     try {
       const res = await fetch(
-        `${cfg.supabaseUrl}/rest/v1/edutube_videos?select=*&video_type=in.(long,short,channel_profile)&order=created_at.desc&limit=200`,
+        `${cfg.supabaseUrl}/rest/v1/edutube_videos?select=*&video_type=in.(long,short,live,channel_profile)&order=created_at.desc&limit=200`,
         {
           headers: {
             apikey: cfg.supabaseAnonKey,
@@ -636,7 +641,9 @@ export async function fetchEduTubeData(): Promise<{
             ) {
               dbChannels.push(normalizeChannelFromRow(row));
             } else if (
-              (row.video_type === 'long' || row.video_type === 'short') &&
+              (row.video_type === 'long' ||
+                row.video_type === 'short' ||
+                row.video_type === 'live') &&
               !deletedIds.includes(String(row.id)) &&
               !String(row.video_url || '').startsWith('blob:')
             ) {
@@ -826,6 +833,12 @@ export function createCustomBannerThumbnail(title: string, tagsPreview = '#edutu
   const trimmedTitle = title.length > 34 ? title.slice(0, 32) + '...' : title || 'New Video';
   const trimmedSub = tagsPreview || '#edutube · #video';
   return createSvgThumbnail(trimmedTitle, trimmedSub, 'EDUTUBE', '#EF4444', '#090D16', '#0F172A');
+}
+
+export function createLiveBannerThumbnail(title: string, hostName = 'Live Stream'): string {
+  const trimmedTitle = title.length > 34 ? title.slice(0, 32) + '...' : title || 'Live Session';
+  const trimmedSub = `🔴 LIVE NOW · ${hostName}`;
+  return createSvgThumbnail(trimmedTitle, trimmedSub, '🔴 LIVE STREAM', '#DC2626', '#180409', '#090D16');
 }
 
 /**
@@ -1213,6 +1226,8 @@ export async function publishEduTubeVideo(
           saveLocalVideos([saved, ...current.filter((v) => v.id !== saved.id)]);
 
           // Automatically broadcast a Global Notification to ALL users in Supabase
+          const isLiveNow = saved.video_type === 'live';
+          const displayNotifTitle = isLiveNow ? `🔴 LIVE NOW: ${saved.title}` : saved.title;
           const notifId = `notif_global_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
           const notifPayload = {
             id: notifId,
@@ -1222,7 +1237,7 @@ export async function publishEduTubeVideo(
             senderAvatar: saved.author_photo || '',
             type: 'edutube_video',
             videoId: saved.id,
-            videoTitle: saved.title,
+            videoTitle: displayNotifTitle,
             videoType: saved.video_type,
             targetUrl: '/edutube',
             isRead: false,
@@ -1239,7 +1254,7 @@ export async function publishEduTubeVideo(
             body: JSON.stringify({
               id: notifId,
               title: 'edutube_video',
-              description: saved.title,
+              description: displayNotifTitle,
               video_url: 'blob://hub_notification',
               thumbnail_url: saved.thumbnail_url || saved.author_photo || '',
               duration: saved.duration || '00:00',
@@ -1275,7 +1290,7 @@ export async function publishEduTubeVideo(
  */
 export async function updateEduTubeVideoRecord(
   videoId: string,
-  patch: Partial<Pick<EduTubeVideo, 'views' | 'likes' | 'liked_by' | 'comments'>>
+  patch: Partial<Pick<EduTubeVideo, 'views' | 'likes' | 'liked_by' | 'comments' | 'video_type' | 'duration'>>
 ): Promise<void> {
   const current = getLocalVideos();
   const target = current.find((v) => v.id === videoId);
@@ -1315,6 +1330,34 @@ export async function updateEduTubeVideoRecord(
   }
 }
 
+/**
+ * Polls a single video row from Supabase for Real-Time Live Chat & Live Viewer/Likes updates (0 Firebase Reads)
+ */
+export async function fetchSingleEduTubeVideo(videoId: string): Promise<EduTubeVideo | null> {
+  const cfg = getCloudConfig();
+  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return null;
+  try {
+    const res = await fetch(
+      `${cfg.supabaseUrl}/rest/v1/edutube_videos?select=*&id=eq.${encodeURIComponent(videoId)}&limit=1`,
+      {
+        headers: {
+          apikey: cfg.supabaseAnonKey,
+          Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+        },
+      }
+    );
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows[0]) {
+        return normalizeVideoRow(rows[0]);
+      }
+    }
+  } catch {
+    // ignore transient network errors
+  }
+  return null;
+}
+
 export async function deleteEduTubeVideoRecord(videoId: string): Promise<void> {
   addDeletedId(videoId);
   const current = getLocalVideos();
@@ -1337,17 +1380,29 @@ export async function deleteEduTubeVideoRecord(videoId: string): Promise<void> {
 }
 
 /**
- * Parses YouTube / Google Drive links so both direct MP4 uploads and external links play smoothly
+ * Parses YouTube (including YouTube Live), built-in Live Broadcast Rooms, and Google Drive links
  */
 export function getEmbedInfo(url: string): {
-  type: 'youtube' | 'gdrive' | 'video';
+  type: 'youtube' | 'gdrive' | 'live_room' | 'video';
   embedUrl: string;
   youtubeId?: string;
+  roomId?: string;
 } {
   if (!url) return { type: 'video', embedUrl: '' };
 
+  if (url.startsWith('live://room/')) {
+    const roomId = url.replace('live://room/', '').split('?')[0].trim();
+    return {
+      type: 'live_room',
+      roomId,
+      embedUrl: `https://meet.jit.si/${encodeURIComponent(
+        roomId
+      )}#config.prejoinPageEnabled=false&config.startWithVideoMuted=false&config.startWithAudioMuted=false&interfaceConfig.SHOW_JITSI_WATERMARK=false`,
+    };
+  }
+
   const ytMatch = url.match(
-    /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
+    /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
   );
   if (ytMatch && ytMatch[1]) {
     const videoId = ytMatch[1];

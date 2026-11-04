@@ -32,6 +32,10 @@ import {
   Volume2,
   VolumeX,
   Pause,
+  Radio,
+  Video,
+  StopCircle,
+  Eye,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../AuthContext';
@@ -42,6 +46,7 @@ import {
   EduTubeChannel,
   VideoFormat,
   fetchEduTubeData,
+  fetchSingleEduTubeVideo,
   publishEduTubeVideo,
   updateEduTubeVideoRecord,
   deleteEduTubeVideoRecord,
@@ -53,6 +58,7 @@ import {
   compressThumbnailFile,
   inspectVideoFile,
   createCustomBannerThumbnail,
+  createLiveBannerThumbnail,
   createChannelBannerSvg,
   parseVideoTags,
   getEmbedInfo,
@@ -68,8 +74,8 @@ import {
 } from '../lib/edutube';
 import { formatDistanceToNow } from 'date-fns';
 
-type FeedTab = 'home' | 'shorts' | 'subscriptions' | 'channels' | 'saved' | 'my_channel';
-type ChannelSubTab = 'videos' | 'shorts' | 'about';
+type FeedTab = 'home' | 'live' | 'shorts' | 'subscriptions' | 'channels' | 'saved' | 'my_channel';
+type ChannelSubTab = 'videos' | 'live' | 'shorts' | 'about';
 
 const SUGGESTED_TAGS = [
   '#trending',
@@ -155,6 +161,20 @@ export default function EduTube() {
   const [supabaseUrlInput, setSupabaseUrlInput] = useState(() => getCloudConfig().supabaseUrl);
   const [supabaseKeyInput, setSupabaseKeyInput] = useState(() => getCloudConfig().supabaseAnonKey);
 
+  // Go Live Broadcast Studio Modal state
+  const [isLiveModalOpen, setIsLiveModalOpen] = useState(false);
+  const [liveMode, setLiveMode] = useState<'youtube_live' | 'camera_room'>('youtube_live');
+  const [liveTitle, setLiveTitle] = useState('');
+  const [liveDescription, setLiveDescription] = useState('');
+  const [liveTagsInput, setLiveTagsInput] = useState('#live #edutube #study');
+  const [liveStreamUrl, setLiveStreamUrl] = useState('');
+  const [liveThumbPreview, setLiveThumbPreview] = useState('');
+  const [liveThumbBlob, setLiveThumbBlob] = useState<Blob | null>(null);
+  const [isStartingLive, setIsStartingLive] = useState(false);
+  const [cameraPreviewActive, setCameraPreviewActive] = useState(false);
+  const cameraPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -238,6 +258,41 @@ export default function EduTube() {
     [videos, activeVideoId]
   );
 
+  // Real-Time Live Stream Polling (Syncs Live Chat, Likes & Viewers every 3s with 0 Firebase Reads)
+  useEffect(() => {
+    if (!activeVideoId || !activeVideo || activeVideo.video_type !== 'live') return;
+    const interval = setInterval(async () => {
+      const fresh = await fetchSingleEduTubeVideo(activeVideoId);
+      if (fresh) {
+        setVideos((prev) =>
+          prev.map((v) =>
+            v.id === fresh.id
+              ? {
+                  ...v,
+                  views: Math.max(v.views, fresh.views),
+                  likes: fresh.likes,
+                  liked_by: fresh.liked_by,
+                  comments: fresh.comments,
+                  video_type: fresh.video_type,
+                  duration: fresh.duration,
+                }
+              : v
+          )
+        );
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [activeVideoId, activeVideo?.video_type]);
+
+  // Cleanup camera preview stream when Go Live modal closes
+  useEffect(() => {
+    if (!isLiveModalOpen && cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current = null;
+      setCameraPreviewActive(false);
+    }
+  }, [isLiveModalOpen]);
+
   useEffect(() => {
     let cancelled = false;
     if (!activeVideo) {
@@ -307,9 +362,15 @@ export default function EduTube() {
     return Array.from(channelMap.values()).filter((c) => c.subscribers.includes(user.uid));
   }, [channelMap, user]);
 
+  const liveVideosCount = useMemo(
+    () => videos.filter((v) => v.video_type === 'live').length,
+    [videos]
+  );
+
   // Filtered videos for current feed tab, hashtag, and search query
   const filteredVideos = useMemo(() => {
     return videos.filter((v) => {
+      if (activeTab === 'live' && v.video_type !== 'live') return false;
       if (activeTab === 'shorts' && v.video_type !== 'short') return false;
       if (activeTab === 'saved' && !savedIds.includes(v.id)) return false;
       if (activeTab === 'my_channel' && v.author_uid !== user?.uid) return false;
@@ -628,6 +689,182 @@ export default function EduTube() {
     toast.success('Video deleted');
   };
 
+  const handleToggleCameraPreview = async () => {
+    if (cameraPreviewActive && cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current = null;
+      setCameraPreviewActive(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      cameraStreamRef.current = stream;
+      setCameraPreviewActive(true);
+      setTimeout(() => {
+        if (cameraPreviewVideoRef.current) {
+          cameraPreviewVideoRef.current.srcObject = stream;
+        }
+      }, 60);
+    } catch {
+      toast.error('Camera/Mic permission denied or unavailable');
+    }
+  };
+
+  const handleStartLiveStream = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      toast.error('Please login to Go Live on EduTube');
+      return;
+    }
+    if (!liveTitle.trim()) {
+      toast.error('Please enter a title for your Live Stream');
+      return;
+    }
+    if (liveMode === 'youtube_live' && !liveStreamUrl.trim()) {
+      toast.error('Please paste your YouTube Live or Stream URL');
+      return;
+    }
+
+    setIsStartingLive(true);
+    try {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+        cameraStreamRef.current = null;
+        setCameraPreviewActive(false);
+      }
+
+      const creatorChannel = await saveEduTubeChannel({
+        uid: user.uid,
+        name: myChannel?.name || profile?.fullName || user.displayName || 'Creator',
+        handle: myChannel?.handle || profile?.username || 'creator',
+        bio:
+          myChannel?.bio ||
+          'Welcome to my official EduTube channel! Subscribe for regular videos & live streams.',
+        avatar_url: myChannel?.avatar_url || profile?.photoURL || user.photoURL || '',
+        banner_url: myChannel?.banner_url,
+      });
+
+      setChannels((prev) => [
+        creatorChannel,
+        ...prev.filter((c) => c.uid !== creatorChannel.uid),
+      ]);
+
+      const finalTags = parseVideoTags(liveTagsInput, liveTitle, liveDescription);
+      if (!finalTags.includes('#live')) {
+        finalTags.unshift('#live');
+      }
+
+      let finalThumbUrl =
+        liveThumbPreview ||
+        createLiveBannerThumbnail(liveTitle.trim(), creatorChannel.name);
+
+      if (liveThumbBlob) {
+        const uploadedThumb = await uploadMediaToEduTubeCloud(
+          liveThumbBlob,
+          `live_thumb_${Date.now()}.jpg`,
+          'thumbnails'
+        );
+        finalThumbUrl = uploadedThumb.url;
+      }
+
+      const roomSlug = `EduTubeLive_${creatorChannel.handle.replace(/[^a-zA-Z0-9]/g, '')}_${Date.now().toString(36)}`;
+      const finalStreamUrl =
+        liveMode === 'camera_room'
+          ? `live://room/${roomSlug}`
+          : liveStreamUrl.trim();
+
+      const createdLive = await publishEduTubeVideo({
+        title: liveTitle.trim(),
+        description:
+          liveDescription.trim() ||
+          `🔴 Live Stream by ${creatorChannel.name} (@${creatorChannel.handle}). Join the Live Chat and ask your questions!`,
+        video_url: finalStreamUrl,
+        thumbnail_url: finalThumbUrl,
+        duration: 'LIVE',
+        video_type: 'live',
+        tags: finalTags,
+        author_uid: user.uid,
+        author_name: creatorChannel.name,
+        author_username: creatorChannel.handle,
+        author_photo: creatorChannel.avatar_url,
+        storage_provider: 'external',
+      });
+
+      setVideos((prev) => [createdLive, ...prev.filter((v) => v.id !== createdLive.id)]);
+      setIsLiveModalOpen(false);
+      setLiveTitle('');
+      setLiveDescription('');
+      setLiveStreamUrl('');
+      setLiveThumbBlob(null);
+      setLiveThumbPreview('');
+      setViewingChannelUid(null);
+      setActiveVideoId(createdLive.id);
+      toast.success('🔴 You are now LIVE on EduTube! All students have been notified.');
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not start Live Stream');
+    } finally {
+      setIsStartingLive(false);
+    }
+  };
+
+  const handleEndLiveStream = async (video: EduTubeVideo, saveAsReplay: boolean) => {
+    if (saveAsReplay && !video.video_url.startsWith('live://room/')) {
+      await updateEduTubeVideoRecord(video.id, {
+        video_type: 'long',
+        duration: 'LIVE REPLAY',
+      });
+      setVideos((prev) =>
+        prev.map((v) =>
+          v.id === video.id ? { ...v, video_type: 'long', duration: 'LIVE REPLAY' } : v
+        )
+      );
+      toast.success('Live stream ended & saved as Replay on your channel!');
+    } else {
+      await deleteEduTubeVideoRecord(video.id);
+      setVideos((prev) => prev.filter((v) => v.id !== video.id));
+      if (activeVideoId === video.id) {
+        setActiveVideoId(null);
+      }
+      toast.success('Live stream ended');
+    }
+  };
+
+  const handleSendLiveReaction = async (reactionLabel: string) => {
+    if (!activeVideo) return;
+    if (!user) {
+      toast.error('Please login to send live reactions');
+      return;
+    }
+    const senderChannel = myChannel;
+    const newComment = {
+      id: `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      author_uid: user.uid,
+      author_name: senderChannel?.name || profile?.fullName || user.displayName || 'Student',
+      author_username: senderChannel?.handle || profile?.username || 'student',
+      author_photo: senderChannel?.avatar_url || profile?.photoURL || user.photoURL || '',
+      text: reactionLabel,
+      created_at: new Date().toISOString(),
+    };
+    const nextComments = [newComment, ...(activeVideo.comments || [])];
+    const nextLikes = (activeVideo.likes || 0) + 1;
+    const nextLikedBy = activeVideo.liked_by.includes(user.uid)
+      ? activeVideo.liked_by
+      : [...activeVideo.liked_by, user.uid];
+
+    setVideos((prev) =>
+      prev.map((item) =>
+        item.id === activeVideo.id
+          ? { ...item, comments: nextComments, likes: nextLikes, liked_by: nextLikedBy }
+          : item
+      )
+    );
+    await updateEduTubeVideoRecord(activeVideo.id, {
+      comments: nextComments,
+      likes: nextLikes,
+      liked_by: nextLikedBy,
+    });
+  };
+
   // Handle video file selection in Upload Modal
   const handleVideoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -918,6 +1155,31 @@ export default function EduTube() {
               <span>{isSupabaseConfigured() ? 'Cloud Connected' : 'Setup Cloud'}</span>
             </button>
           )}
+
+          <button
+            onClick={() => {
+              if (!user) {
+                toast.error('Please login to Go Live on EduTube');
+                return;
+              }
+              setLiveThumbPreview(
+                createLiveBannerThumbnail(
+                  liveTitle || `${myChannel?.name || 'Creator'} Live Session`,
+                  myChannel?.name || 'EduTube Live'
+                )
+              );
+              setIsLiveModalOpen(true);
+            }}
+            className="px-3.5 py-2 text-sm font-bold rounded-lg bg-slate-900 dark:bg-slate-800 hover:bg-red-950 text-white border border-red-500/40 transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 shadow-sm"
+            title="Start a YouTube-style Live Stream"
+          >
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+            </span>
+            <Radio className="w-4 h-4 text-red-400" />
+            <span>Go Live</span>
+          </button>
 
           <button
             onClick={() => {
@@ -1365,9 +1627,32 @@ export default function EduTube() {
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className={theaterMode ? 'lg:col-span-12' : 'lg:col-span-8'}>
             {/* Video Player Frame */}
-            <div className="w-full bg-black rounded-xl overflow-hidden border border-slate-800 shadow-lg">
+            <div
+              className={`w-full bg-black rounded-xl overflow-hidden border shadow-lg ${
+                activeVideo.video_type === 'live'
+                  ? 'border-red-500/60 ring-1 ring-red-500/30'
+                  : 'border-slate-800'
+              }`}
+            >
               {(() => {
                 const embed = getEmbedInfo(activeVideo.video_url);
+                if (embed.type === 'live_room') {
+                  return (
+                    <div className="relative w-full aspect-video bg-slate-950">
+                      <iframe
+                        src={embed.embedUrl}
+                        title={activeVideo.title}
+                        className="w-full h-full border-0"
+                        allow="camera; microphone; display-capture; autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                        allowFullScreen
+                      />
+                      <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-red-600 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-lg pointer-events-none">
+                        <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                        <span>LIVE STUDIO ROOM</span>
+                      </div>
+                    </div>
+                  );
+                }
                 if (embed.type === 'youtube' && embed.youtubeId) {
                   return (
                     <div className="relative w-full aspect-video">
@@ -1377,6 +1662,12 @@ export default function EduTube() {
                         thumbnailUrl={activeVideo.thumbnail_url}
                         isShort={false}
                       />
+                      {activeVideo.video_type === 'live' && (
+                        <div className="absolute top-3 left-3 z-30 px-2.5 py-1 rounded-md bg-red-600 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-lg pointer-events-none">
+                          <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                          <span>LIVE</span>
+                        </div>
+                      )}
                     </div>
                   );
                 }
@@ -1417,12 +1708,25 @@ export default function EduTube() {
                 );
               })()}
 
-              {/* Player Controls Bar (Speed + Theater Mode) */}
-              <div className="px-4 py-2.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-300">
+              {/* Player Controls Bar (Live Status / Speed + Theater Mode + End Live for Host) */}
+              <div className="px-4 py-2.5 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
                 <div className="flex items-center gap-2 overflow-x-auto">
-                  <span className="font-mono tabular-nums">{activeVideo.duration}</span>
+                  {activeVideo.video_type === 'live' ? (
+                    <span className="px-2 py-0.5 rounded bg-red-600 text-white font-bold text-[11px] flex items-center gap-1.5 shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                      <span>LIVE NOW</span>
+                    </span>
+                  ) : (
+                    <span className="font-mono tabular-nums">{activeVideo.duration}</span>
+                  )}
                   <span aria-hidden="true">·</span>
-                  <span>{activeVideo.video_type === 'short' ? 'Short' : 'Full Video'}</span>
+                  <span className="flex items-center gap-1">
+                    <Eye className="w-3.5 h-3.5 text-slate-400" />
+                    <span>
+                      {activeVideo.views.toLocaleString()}{' '}
+                      {activeVideo.video_type === 'live' ? 'watching' : 'views'}
+                    </span>
+                  </span>
                   {(activeVideo.tags || []).slice(0, 3).map((tag) => (
                     <React.Fragment key={tag}>
                       <span aria-hidden="true">·</span>
@@ -1436,6 +1740,29 @@ export default function EduTube() {
                   ))}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {activeVideo.video_type === 'live' &&
+                    (user?.uid === activeVideo.author_uid || isAdmin) && (
+                      <div className="flex items-center gap-1.5">
+                        {!activeVideo.video_url.startsWith('live://room/') && (
+                          <button
+                            onClick={() => handleEndLiveStream(activeVideo, true)}
+                            className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-semibold flex items-center gap-1 transition-colors whitespace-nowrap"
+                            title="End Live & Save as Replay Video"
+                          >
+                            <StopCircle className="w-3.5 h-3.5" />
+                            <span>End &amp; Save Replay</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleEndLiveStream(activeVideo, false)}
+                          className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-700 text-white font-semibold flex items-center gap-1 transition-colors whitespace-nowrap"
+                          title="End & Remove Live Stream"
+                        >
+                          <StopCircle className="w-3.5 h-3.5" />
+                          <span>End Live</span>
+                        </button>
+                      </div>
+                    )}
                   {getEmbedInfo(activeVideo.video_url).type === 'video' && (
                     <button
                       onClick={handleChangePlaybackSpeed}
@@ -1726,8 +2053,115 @@ export default function EduTube() {
             </div>
           </div>
 
-          {/* Up Next / Related Videos Sidebar */}
+          {/* Right Sidebar: YouTube-Style Live Chat (when watching a Live Stream) + Up Next Videos */}
           <div className={theaterMode ? 'lg:col-span-12' : 'lg:col-span-4'}>
+            {activeVideo.video_type === 'live' && (
+              <div className="mb-6 rounded-2xl bg-white dark:bg-slate-900 border border-red-500/40 shadow-lg overflow-hidden flex flex-col h-[460px]">
+                {/* Live Chat Header */}
+                <div className="px-4 py-3 bg-slate-950 text-white border-b border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+                    </span>
+                    <span className="text-xs font-bold tracking-wide uppercase">
+                      Top Live Chat
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                    {activeVideo.comments?.length || 0} messages
+                  </span>
+                </div>
+
+                {/* Live Chat Messages Feed */}
+                <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 bg-slate-50/60 dark:bg-slate-950/50">
+                  {(activeVideo.comments || []).length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                      <Radio className="w-7 h-7 text-red-500 mb-2 animate-pulse" />
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Welcome to the Live Chat!
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Say hi, ask doubts, or tap a reaction below.
+                      </p>
+                    </div>
+                  ) : (
+                    activeVideo.comments.map((c) => (
+                      <div
+                        key={c.id}
+                        className="flex items-start gap-2.5 text-xs p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800"
+                      >
+                        <div
+                          onClick={() => handleOpenChannelPage(c.author_uid)}
+                          className="w-6 h-6 rounded-full bg-red-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0 cursor-pointer overflow-hidden mt-0.5"
+                        >
+                          {c.author_photo ? (
+                            <img
+                              src={c.author_photo}
+                              alt={c.author_name}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            c.author_name[0]?.toUpperCase() || 'U'
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-bold text-slate-900 dark:text-white mr-1.5">
+                            {c.author_name}
+                          </span>
+                          <span className="text-slate-700 dark:text-slate-200 break-words">
+                            {c.text}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Quick 1-Tap Live Reactions Bar */}
+                <div className="px-3 py-2 bg-slate-100 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-1">
+                  {[
+                    { label: '🔥 Fire!', short: '🔥' },
+                    { label: '❤️ Love it!', short: '❤️' },
+                    { label: '👏 Great explanation!', short: '👏' },
+                    { label: '💯 Crystal Clear!', short: '💯' },
+                    { label: '🚀 OP Live!', short: '🚀' },
+                  ].map((r) => (
+                    <button
+                      key={r.short}
+                      type="button"
+                      onClick={() => handleSendLiveReaction(r.label)}
+                      className="flex-1 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-transform active:scale-90"
+                      title={`Send ${r.label}`}
+                    >
+                      {r.short}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Live Chat Input Form */}
+                <form
+                  onSubmit={handlePostComment}
+                  className="p-2.5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    placeholder="Chat live with everyone..."
+                    className="flex-1 px-3 py-2 text-xs rounded-lg bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-red-500"
+                  />
+                  <button
+                    type="submit"
+                    className="px-3.5 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1 shrink-0"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                </form>
+              </div>
+            )}
+
             <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
               Up Next · Recommended Videos
             </h3>
@@ -2072,6 +2506,28 @@ export default function EduTube() {
                 Home
               </button>
               <button
+                onClick={() => setActiveTab('live')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md whitespace-nowrap shrink-0 transition-colors flex items-center gap-1.5 ${
+                  activeTab === 'live'
+                    ? 'bg-red-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <span className="relative flex h-2 w-2">
+                  <span
+                    className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                      activeTab === 'live' ? 'bg-white' : 'bg-red-500'
+                    }`}
+                  />
+                  <span
+                    className={`relative inline-flex rounded-full h-2 w-2 ${
+                      activeTab === 'live' ? 'bg-white' : 'bg-red-600'
+                    }`}
+                  />
+                </span>
+                <span>Live {liveVideosCount > 0 ? `(${liveVideosCount})` : ''}</span>
+              </button>
+              <button
                 onClick={() => {
                   const firstShort = videos.find((v) => v.video_type === 'short');
                   if (firstShort) {
@@ -2312,19 +2768,47 @@ export default function EduTube() {
             </div>
           ) : filteredVideos.length === 0 ? (
             <div className="mt-8 p-12 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center">
-              <Film className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+              {activeTab === 'live' ? (
+                <Radio className="w-10 h-10 text-red-500 mx-auto mb-3 animate-pulse" />
+              ) : (
+                <Film className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+              )}
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                {activeTab === 'subscriptions'
+                {activeTab === 'live'
+                  ? 'No one is Live right now'
+                  : activeTab === 'subscriptions'
                   ? 'No videos from subscribed channels yet'
                   : 'No videos found'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
-                {activeTab === 'subscriptions'
+                {activeTab === 'live'
+                  ? 'Start your own Live Stream using your Camera/Screen or a YouTube Live link!'
+                  : activeTab === 'subscriptions'
                   ? 'Explore creator channels and click Subscribe to see their videos here!'
                   : 'Upload your own video with a custom thumbnail and #hashtags, or explore other tags.'}
               </p>
               <div className="mt-4 flex items-center justify-center gap-3">
-                {activeTab === 'subscriptions' ? (
+                {activeTab === 'live' ? (
+                  <button
+                    onClick={() => {
+                      if (!user) {
+                        toast.error('Please login to Go Live');
+                        return;
+                      }
+                      setLiveThumbPreview(
+                        createLiveBannerThumbnail(
+                          `${myChannel?.name || 'Creator'} Live Session`,
+                          myChannel?.name || 'EduTube Live'
+                        )
+                      );
+                      setIsLiveModalOpen(true);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold inline-flex items-center gap-2"
+                  >
+                    <Radio className="w-4 h-4" />
+                    <span>Go Live Now</span>
+                  </button>
+                ) : activeTab === 'subscriptions' ? (
                   <button
                     onClick={() => setActiveTab('channels')}
                     className="px-4 py-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-semibold"
@@ -2344,6 +2828,102 @@ export default function EduTube() {
             </div>
           ) : (
             <div className="space-y-8 mt-2">
+              {/* 🔴 LIVE STREAMS SHELF (Shown whenever any stream is active) */}
+              {filteredVideos.some((v) => v.video_type === 'live') && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span className="relative flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600" />
+                      </span>
+                      <span>Live Now on EduTube</span>
+                    </h2>
+                    <button
+                      onClick={() => {
+                        if (!user) {
+                          toast.error('Please login to Go Live');
+                          return;
+                        }
+                        setLiveThumbPreview(
+                          createLiveBannerThumbnail(
+                            `${myChannel?.name || 'Creator'} Live Session`,
+                            myChannel?.name || 'EduTube Live'
+                          )
+                        );
+                        setIsLiveModalOpen(true);
+                      }}
+                      className="text-xs font-bold text-red-600 dark:text-red-400 hover:underline flex items-center gap-1"
+                    >
+                      <Radio className="w-3.5 h-3.5" />
+                      <span>+ Start Live</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredVideos
+                      .filter((v) => v.video_type === 'live')
+                      .map((video) => {
+                        const vidChannel = getChannelForVideo(video);
+                        return (
+                          <div
+                            key={video.id}
+                            onClick={() => handleSelectVideoToWatch(video)}
+                            className="group rounded-xl bg-white dark:bg-slate-900 border-2 border-red-500/60 overflow-hidden hover:border-red-500 transition-all cursor-pointer flex flex-col shadow-md"
+                          >
+                            <div className="relative w-full aspect-video bg-slate-950 overflow-hidden">
+                              <img
+                                src={video.thumbnail_url}
+                                alt={video.title}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                              />
+                              <div className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-md bg-red-600 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-lg">
+                                <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                                <span>LIVE</span>
+                              </div>
+                              <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/85 text-white text-[11px] font-mono tabular-nums flex items-center gap-1">
+                                <Eye className="w-3 h-3 text-red-400" />
+                                <span>{video.views.toLocaleString()} watching</span>
+                              </div>
+                            </div>
+
+                            <div className="p-3.5 flex gap-3 flex-1">
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenChannelPage(vidChannel.uid);
+                                }}
+                                className="shrink-0 mt-0.5"
+                              >
+                                {vidChannel.avatar_url ? (
+                                  <img
+                                    src={vidChannel.avatar_url}
+                                    alt={vidChannel.name}
+                                    referrerPolicy="no-referrer"
+                                    className="w-9 h-9 rounded-full object-cover border-2 border-red-500"
+                                  />
+                                ) : (
+                                  <div className="w-9 h-9 rounded-full bg-red-600 text-white font-bold text-xs flex items-center justify-center">
+                                    {vidChannel.name[0]?.toUpperCase() || 'C'}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-sm font-bold text-slate-900 dark:text-white line-clamp-2 leading-snug group-hover:text-red-600 dark:group-hover:text-red-400">
+                                  {video.title}
+                                </h3>
+                                <div className="mt-1 text-xs text-slate-600 dark:text-slate-400 truncate">
+                                  {vidChannel.name} · @{vidChannel.handle}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
               {/* Vertical 9:16 Shorts Shelf (like YouTube Home / Shorts tab) */}
               {filteredVideos.some((v) => v.video_type === 'short') && (
                 <div>
@@ -2399,9 +2979,10 @@ export default function EduTube() {
               )}
 
               {/* Standard 16:9 Long Videos Grid */}
-              {filteredVideos.some((v) => v.video_type !== 'short') && (
+              {filteredVideos.some((v) => v.video_type === 'long') && (
                 <div>
-                  {filteredVideos.some((v) => v.video_type === 'short') && (
+                  {(filteredVideos.some((v) => v.video_type === 'short') ||
+                    filteredVideos.some((v) => v.video_type === 'live')) && (
                     <h2 className="text-base font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-1.5">
                       <Film className="w-4 h-4 text-red-600" />
                       <span>Videos</span>
@@ -2409,7 +2990,7 @@ export default function EduTube() {
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredVideos
-                      .filter((v) => v.video_type !== 'short')
+                      .filter((v) => v.video_type === 'long')
                       .map((video) => {
                         const vidChannel = getChannelForVideo(video);
                         return (
@@ -2976,6 +3557,222 @@ export default function EduTube() {
                 >
                   <Upload className="w-4 h-4" />
                   <span>{isUploading ? 'Publishing...' : 'Publish Video'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🔴 GO LIVE BROADCAST STUDIO MODAL */}
+      {isLiveModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-red-500/40 rounded-2xl max-w-2xl w-full p-6 shadow-2xl my-8 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-red-600 text-white flex items-center justify-center shadow-md">
+                  <Radio className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Go Live on {myChannel?.name || 'Your Channel'}</span>
+                    <span className="px-2 py-0.5 rounded bg-red-600/15 text-red-600 dark:text-red-400 text-[10px] font-bold uppercase">
+                      Live Studio
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Stream live to all students with Real-Time Live Chat &amp; Instant Notification
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsLiveModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleStartLiveStream} className="mt-5 space-y-5">
+              {/* Live Mode Selector: YouTube Live Link vs Direct Camera / Screen Live Room */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-1.5 bg-slate-100 dark:bg-slate-950 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setLiveMode('youtube_live')}
+                  className={`py-2.5 px-3 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${
+                    liveMode === 'youtube_live'
+                      ? 'bg-red-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>YouTube Live / Stream Link</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLiveMode('camera_room')}
+                  className={`py-2.5 px-3 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${
+                    liveMode === 'camera_room'
+                      ? 'bg-red-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Video className="w-4 h-4" />
+                  <span>Direct Camera / Screen Share Live</span>
+                </button>
+              </div>
+
+              {liveMode === 'youtube_live' ? (
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2.5">
+                  <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Paste YouTube Live URL or Stream Video Link *
+                  </label>
+                  <input
+                    type="url"
+                    required={liveMode === 'youtube_live'}
+                    value={liveStreamUrl}
+                    onChange={(e) => setLiveStreamUrl(e.target.value)}
+                    placeholder="https://www.youtube.com/live/... or https://youtu.be/..."
+                    className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-red-500"
+                  />
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    💡 <strong>Pro Tip:</strong> Aap YouTube app/studio se <em>Unlisted</em> ya <em>Public</em> Live start karke uska link yahan paste kar sakte ho. Woh seedha EduTube Player ke andar bina YouTube logo/related videos ke chalega + EduTube Live Chat ke saath!
+                  </p>
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                        Instant Camera &amp; Screen-Share Live Broadcast Room
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Go live directly from your phone camera or PC screen without needing YouTube or OBS
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleCameraPreview}
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-800 text-white text-xs font-semibold flex items-center gap-1.5"
+                    >
+                      <Video className="w-3.5 h-3.5 text-red-400" />
+                      <span>{cameraPreviewActive ? 'Stop Camera Test' : 'Test Camera Preview'}</span>
+                    </button>
+                  </div>
+
+                  {cameraPreviewActive && (
+                    <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black border border-red-500/40">
+                      <video
+                        ref={cameraPreviewVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="w-full h-full object-cover"
+                      />
+                      <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold">
+                        CAMERA READY
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Live Title & Description */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Live Stream Title *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={liveTitle}
+                    onChange={(e) => {
+                      setLiveTitle(e.target.value);
+                      if (!liveThumbBlob) {
+                        setLiveThumbPreview(
+                          createLiveBannerThumbnail(
+                            e.target.value || 'Live Stream',
+                            myChannel?.name || 'EduTube Live'
+                          )
+                        );
+                      }
+                    }}
+                    placeholder="e.g. 🔴 LIVE Doubt Solving + Rotation PYQs Marathon!"
+                    className="w-full px-3.5 py-2 text-sm rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Live Description / Topic Details
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={liveDescription}
+                    onChange={(e) => setLiveDescription(e.target.value)}
+                    placeholder="What are you covering in today's Live session?"
+                    className="w-full px-3.5 py-2 text-sm rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Hashtags
+                    </label>
+                    <input
+                      type="text"
+                      value={liveTagsInput}
+                      onChange={(e) => setLiveTagsInput(e.target.value)}
+                      placeholder="#live #edutube #study"
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Live Thumbnail Banner
+                    </label>
+                    <label className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer hover:bg-slate-200 inline-flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-red-500" />
+                      <span>Upload Custom Live Thumbnail</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          try {
+                            const compressed = await compressThumbnailFile(file, 1280, 720);
+                            setLiveThumbBlob(compressed.blob);
+                            setLiveThumbPreview(compressed.dataUrl);
+                          } catch {
+                            toast.error('Could not process thumbnail');
+                          }
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsLiveModalOpen(false)}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isStartingLive}
+                  className="px-5 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-red-600/30"
+                >
+                  <Radio className="w-4 h-4" />
+                  <span>{isStartingLive ? 'Starting Live Stream...' : '🔴 Start Live Now'}</span>
                 </button>
               </div>
             </form>
