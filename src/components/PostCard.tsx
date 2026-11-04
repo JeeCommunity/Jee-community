@@ -15,6 +15,11 @@ import { logManagerAction } from '../lib/managerLogs';
 
 import { createNotification } from '../lib/notifications';
 import { renderTextWithLinks } from '../lib/linkify';
+import {
+  updateSupabaseCommunityPost,
+  deleteSupabaseCommunityPost,
+  getCachedUserProfile,
+} from '../lib/supabaseHub';
 
 interface PostCardProps {
   post: any;
@@ -60,29 +65,33 @@ export default function PostCard({ post, onDelete, initialShowComments = false }
   const handleReport = async () => {
     if (!user) return;
     try {
-      const postRef = doc(db, 'posts', post.id);
-      await updateDoc(postRef, {
-        reportCount: increment(1),
-        reportedBy: arrayUnion(user.uid),
-        reports: arrayUnion({ userId: user.uid, reason: reportReason, date: new Date().toISOString() })
+      const nextReports = [
+        ...(Array.isArray(post.reports) ? post.reports : []),
+        { userId: user.uid, reason: reportReason, date: new Date().toISOString() },
+      ];
+      const nextReportedBy = Array.from(
+        new Set([...(Array.isArray(post.reportedBy) ? post.reportedBy : []), user.uid])
+      );
+      await updateSupabaseCommunityPost(post.id, post, {
+        reportCount: (post.reportCount || 0) + 1,
+        reportedBy: nextReportedBy,
+        reports: nextReports,
       });
       setShowReportConfirm(false);
       alert('Post reported to admins.');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error reporting post', error?.message || 'Error');
     }
   };
-const handleVote = async (optionId: string) => {
+
+  const handleVote = async (optionId: string) => {
     if (!user || isVoting || !post.poll) return;
     setIsVoting(true);
     try {
-      const postRef = doc(db, 'posts', post.id);
-      
-      // Calculate new poll data
       const currentVoters = post.poll.voters || {};
       const currentOptions = post.poll.options || [];
       const previousVoteId = currentVoters[user.uid];
-      
+
       const newVoters = { ...currentVoters, [user.uid]: optionId };
       const newOptions = currentOptions.map((opt: any) => {
         let votes = opt.votes || 0;
@@ -90,99 +99,118 @@ const handleVote = async (optionId: string) => {
         if (opt.id === optionId) votes++;
         return { ...opt, votes };
       });
-      
-      await updateDoc(postRef, {
-        'poll.voters': newVoters,
-        'poll.options': newOptions
+
+      const nextPoll = {
+        ...post.poll,
+        voters: newVoters,
+        options: newOptions,
+      };
+      post.poll = nextPoll;
+
+      await updateSupabaseCommunityPost(post.id, post, {
+        poll: nextPoll,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to vote:', error?.message || 'Error');
     } finally {
       setIsVoting(false);
     }
   };
 
-
   const togglePin = async () => {
     if (!isAdmin) return;
     try {
-      const postRef = doc(db, 'posts', post.id);
-      await updateDoc(postRef, { isPinned: !post.isPinned });
+      await updateSupabaseCommunityPost(post.id, post, { isPinned: !post.isPinned });
       setShowMenu(false);
-    } catch (err) {
-      console.error("Failed to pin post", err?.message || 'Error');
+    } catch (err: any) {
+      console.error('Failed to pin post', err?.message || 'Error');
     }
   };
 
   const handleLike = async () => {
     if (!user) return;
-    const postRef = doc(db, 'posts', post.id);
-    const authorRef = doc(db, 'users', post.authorId);
-    
-    // Optimistic Update
+    const currentLikedBy: string[] = Array.isArray(post.likedBy) ? post.likedBy : [];
+    const currentDislikedBy: string[] = Array.isArray(post.dislikedBy) ? post.dislikedBy : [];
+
     if (localIsLiked) {
+      const nextLikedBy = currentLikedBy.filter((id) => id !== user.uid);
+      const nextCount = Math.max(0, localLikesCount - 1);
       setLocalIsLiked(false);
-      setLocalLikesCount(Math.max(0, localLikesCount - 1));
-      await updateDoc(postRef, {
-        likedBy: arrayRemove(user.uid),
-        likesCount: Math.max(0, localLikesCount - 1)
+      setLocalLikesCount(nextCount);
+      post.likedBy = nextLikedBy;
+      post.likesCount = nextCount;
+      await updateSupabaseCommunityPost(post.id, post, {
+        likedBy: nextLikedBy,
+        likesCount: nextCount,
       });
     } else {
+      const nextLikedBy = Array.from(new Set([...currentLikedBy, user.uid]));
+      const nextCount = localLikesCount + 1;
       setLocalIsLiked(true);
-      setLocalLikesCount(localLikesCount + 1);
-      
+      setLocalLikesCount(nextCount);
+
       const updates: any = {
-        likedBy: arrayUnion(user.uid),
-        likesCount: localLikesCount + 1
+        likedBy: nextLikedBy,
+        likesCount: nextCount,
       };
-      
+
       if (localIsDisliked) {
+        const nextDislikedBy = currentDislikedBy.filter((id) => id !== user.uid);
+        const nextDislikesCount = Math.max(0, localDislikesCount - 1);
         setLocalIsDisliked(false);
-        setLocalDislikesCount(Math.max(0, localDislikesCount - 1));
-        updates.dislikedBy = arrayRemove(user.uid);
-        updates.dislikesCount = Math.max(0, localDislikesCount - 1);
+        setLocalDislikesCount(nextDislikesCount);
+        updates.dislikedBy = nextDislikedBy;
+        updates.dislikesCount = nextDislikesCount;
       }
-      
-      await updateDoc(postRef, updates);
+
+      Object.assign(post, updates);
+      await updateSupabaseCommunityPost(post.id, post, updates);
       if (post.authorId !== user.uid) {
-         createNotification({
-            recipientId: post.authorId,
-            senderId: user.uid,
-            senderName: profile?.fullName || profile?.username || "Unknown",
-            senderAvatar: profile?.photoURL || "",
-            type: 'like',
-            postId: post.id,
-            postContent: post.content?.substring(0, 50) || "Image post"
-         });
+        createNotification({
+          recipientId: post.authorId,
+          senderId: user.uid,
+          senderName: profile?.fullName || profile?.username || 'Unknown',
+          senderAvatar: profile?.photoURL || '',
+          type: 'like',
+          postId: post.id,
+          postContent: (post.text || post.content || 'Image post').substring(0, 50),
+        });
       }
     }
   };
 
   const handleDislike = async () => {
     if (!user) return;
-    const postRef = doc(db, 'posts', post.id);
-    
+    const currentLikedBy: string[] = Array.isArray(post.likedBy) ? post.likedBy : [];
+    const currentDislikedBy: string[] = Array.isArray(post.dislikedBy) ? post.dislikedBy : [];
+
     if (localIsDisliked) {
+      const nextDislikedBy = currentDislikedBy.filter((id) => id !== user.uid);
+      const nextDislikesCount = Math.max(0, localDislikesCount - 1);
       setLocalIsDisliked(false);
-      setLocalDislikesCount(Math.max(0, localDislikesCount - 1));
-      await updateDoc(postRef, {
-        dislikedBy: arrayRemove(user.uid),
-        dislikesCount: Math.max(0, localDislikesCount - 1)
+      setLocalDislikesCount(nextDislikesCount);
+      await updateSupabaseCommunityPost(post.id, post, {
+        dislikedBy: nextDislikedBy,
+        dislikesCount: nextDislikesCount,
       });
     } else {
+      const nextDislikedBy = Array.from(new Set([...currentDislikedBy, user.uid]));
+      const nextDislikesCount = localDislikesCount + 1;
       setLocalIsDisliked(true);
-      setLocalDislikesCount(localDislikesCount + 1);
+      setLocalDislikesCount(nextDislikesCount);
       const updates: any = {
-        dislikedBy: arrayUnion(user.uid),
-        dislikesCount: localDislikesCount + 1
+        dislikedBy: nextDislikedBy,
+        dislikesCount: nextDislikesCount,
       };
       if (localIsLiked) {
+        const nextLikedBy = currentLikedBy.filter((id) => id !== user.uid);
+        const nextLikesCount = Math.max(0, localLikesCount - 1);
         setLocalIsLiked(false);
-        setLocalLikesCount(Math.max(0, localLikesCount - 1));
-        updates.likedBy = arrayRemove(user.uid);
-        updates.likesCount = Math.max(0, localLikesCount - 1);
+        setLocalLikesCount(nextLikesCount);
+        updates.likedBy = nextLikedBy;
+        updates.likesCount = nextLikesCount;
       }
-      await updateDoc(postRef, updates);
+      await updateSupabaseCommunityPost(post.id, post, updates);
     }
   };
 
@@ -190,28 +218,14 @@ const handleVote = async (optionId: string) => {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [isVoting, setIsVoting] = useState(false);
   const [showAI, setShowAI] = useState(false);
-  
+
   const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
-    // Only count view if not already viewed by this user locally
     const viewedPosts = JSON.parse(localStorage.getItem('viewedPosts') || '{}');
-    
     if (!viewedPosts[post.id]) {
-      const timer = setTimeout(async () => {
-        try {
-           const postRef = doc(db, 'posts', post.id);
-           await updateDoc(postRef, {
-             viewsCount: increment(1)
-           });
-           viewedPosts[post.id] = true;
-           localStorage.setItem('viewedPosts', safeStringify(viewedPosts));
-        } catch (e) {
-           console.error("Failed to update views", e?.message || 'Error');
-        }
-      }, 3000); // 3 seconds in view to count
-
-      return () => clearTimeout(timer);
+      viewedPosts[post.id] = true;
+      localStorage.setItem('viewedPosts', safeStringify(viewedPosts));
     }
   }, [post.id]);
 
@@ -249,15 +263,25 @@ const handleVote = async (optionId: string) => {
   };
 
   useEffect(() => {
+    let active = true;
+    if (post.authorName) {
+      setAuthor({
+        fullName: post.authorName,
+        username: post.authorUsername || 'student',
+        photoURL: post.authorPhoto || '',
+      });
+    }
     const fetchAuthor = async () => {
-      const docRef = doc(db, 'users', post.authorId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setAuthor(docSnap.data());
+      const cached = await getCachedUserProfile(post.authorId);
+      if (active && cached) {
+        setAuthor(cached);
       }
     };
     fetchAuthor();
-  }, [post.authorId]);
+    return () => {
+      active = false;
+    };
+  }, [post.authorId, post.authorName, post.authorUsername, post.authorPhoto]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -272,7 +296,7 @@ const handleVote = async (optionId: string) => {
   const handleDelete = async () => {
     if (!canDeletePost) return;
     try {
-      await deleteDoc(doc(db, 'posts', post.id));
+      await deleteSupabaseCommunityPost(post.id);
       if (!isAdmin && user?.uid !== post.authorId && canManagerDelete && user && profile) {
         await logManagerAction({
           managerId: user.uid,
@@ -290,7 +314,7 @@ const handleVote = async (optionId: string) => {
       toast.success('Post deleted');
       onDelete?.(post.id);
     } catch (err: any) {
-      console.error("Failed to delete", err?.message || 'Error');
+      console.error('Failed to delete', err?.message || 'Error');
       toast.error('Failed to delete post');
     }
   };
@@ -352,10 +376,10 @@ const handleVote = async (optionId: string) => {
         finalPdfUrl = await uploadFileToCloudinaryLocal(newPdfFile);
       }
 
-      await updateDoc(doc(db, 'posts', post.id), {
+      await updateSupabaseCommunityPost(post.id, post, {
         text: editedText.trim(),
         images: finalImages,
-        pdfUrl: finalPdfUrl
+        pdfUrl: finalPdfUrl,
       });
       setIsEditing(false);
       setNewImageFiles([]);

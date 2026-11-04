@@ -3,6 +3,7 @@ import { User, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, getDocFromCache } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { requestNotificationPermission } from './lib/fcm';
+import { cacheUserProfileInSupabase, getCachedUserProfile } from './lib/supabaseHub';
 
 export interface ManagerPermissions {
   canDeletePosts: boolean;
@@ -115,25 +116,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          setProfile({ uid: currentUser.uid, ...data });
-          localStorage.setItem('userProfileCache_' + currentUser.uid, JSON.stringify({ uid: currentUser.uid, ...data }));
+          const fullProfile = { uid: currentUser.uid, ...data };
+          setProfile(fullProfile);
+          localStorage.setItem(
+            'userProfileCache_' + currentUser.uid,
+            JSON.stringify(fullProfile)
+          );
+          cacheUserProfileInSupabase(currentUser.uid, fullProfile).catch(() => {});
         } else {
           localStorage.removeItem('userProfileCache_' + currentUser.uid);
           setProfile(null);
         }
       } catch (error: any) {
-        console.error("Error fetching profile:", error?.message || 'Error');
-        // Fallback to localStorage cache if offline
+        console.error('Error fetching profile:', error?.message || 'Error');
         const localCache = localStorage.getItem('userProfileCache_' + currentUser.uid);
         if (localCache) {
-            try {
-                setProfile(JSON.parse(localCache));
-                return;
-            } catch (e) {
-                console.error("Failed to parse cached profile", e);
-            }
+          try {
+            setProfile(JSON.parse(localCache));
+            return;
+          } catch (e) {
+            console.error('Failed to parse cached profile', e);
+          }
         }
-        // If no cache, we just set profile to null (forces setup)
+        try {
+          const supaCached = await getCachedUserProfile(currentUser.uid);
+          if (supaCached) {
+            setProfile(supaCached);
+            return;
+          }
+        } catch {
+          // ignore
+        }
         setProfile(null);
       }
     } else {

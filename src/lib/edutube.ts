@@ -61,7 +61,7 @@ export const JEE_COMMUNITY_OFFICIAL_BIO =
   'Official Video & Creator Hub of JEE Community 🇮🇳 | Watch Concept Breakdowns, Problem Solutions, Study Strategies, Campus Vlogs & Quick Shorts. Subscribe & share your own videos with the community!';
 
 const LOCAL_VIDEOS_KEY = 'edutube_videos_cache_v4';
-const LOCAL_CHANNELS_KEY = 'edutube_channels_cache_v4';
+const LOCAL_CHANNELS_KEY = 'edutube_channels_cache_v5';
 const LOCAL_DELETED_IDS_KEY = 'edutube_deleted_ids_v1';
 const LOCAL_CONFIG_KEY = 'edutube_cloud_config_v1';
 const SAVED_VIDEOS_KEY = 'edutube_saved_ids_v1';
@@ -473,10 +473,7 @@ function normalizeChannelFromRow(r: any): EduTubeChannel {
   const uid = String(r.author_uid || r.uid || String(r.id || '').replace(/^channel_/, ''));
   const rawName = r.title || r.name || r.author_name || 'Creator Channel';
   const handle = (r.author_username || r.handle || rawName.toLowerCase().replace(/[^a-z0-9]/g, '_')).replace(/^@/, '');
-  const isOfficialJeeChannel =
-    uid === '8MFhW6Ljr0bibCPjos5734DTkHR2' ||
-    handle.toLowerCase() === 'jeecommunity' ||
-    rawName.toLowerCase().trim() === 'jee community';
+  const isOfficialJeeChannel = uid === '8MFhW6Ljr0bibCPjos5734DTkHR2';
 
   const name = isOfficialJeeChannel ? 'JEE Community' : rawName;
 
@@ -616,7 +613,7 @@ export async function fetchEduTubeData(): Promise<{
   if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
     try {
       const res = await fetch(
-        `${cfg.supabaseUrl}/rest/v1/edutube_videos?select=*&order=created_at.desc&limit=200`,
+        `${cfg.supabaseUrl}/rest/v1/edutube_videos?select=*&video_type=in.(long,short,channel_profile)&order=created_at.desc&limit=200`,
         {
           headers: {
             apikey: cfg.supabaseAnonKey,
@@ -639,6 +636,7 @@ export async function fetchEduTubeData(): Promise<{
             ) {
               dbChannels.push(normalizeChannelFromRow(row));
             } else if (
+              (row.video_type === 'long' || row.video_type === 'short') &&
               !deletedIds.includes(String(row.id)) &&
               !String(row.video_url || '').startsWith('blob:')
             ) {
@@ -706,10 +704,7 @@ export async function saveEduTubeChannel(channelInput: {
   ).replace(/^@/, '');
 
   const cleanName = channelInput.name.trim() || 'My Channel';
-  const isOfficialJeeChannel =
-    channelInput.uid === '8MFhW6Ljr0bibCPjos5734DTkHR2' ||
-    cleanHandle.toLowerCase() === 'jeecommunity' ||
-    cleanName.toLowerCase() === 'jee community';
+  const isOfficialJeeChannel = channelInput.uid === '8MFhW6Ljr0bibCPjos5734DTkHR2';
 
   let resolvedBanner = channelInput.banner_url || existing?.banner_url || '';
   if (!resolvedBanner || resolvedBanner.startsWith('data:image/svg+xml')) {
@@ -953,18 +948,26 @@ export async function inspectVideoFile(
         clearTimeout(timeoutId);
         try {
           const canvas = document.createElement('canvas');
-          canvas.width = 1280;
-          canvas.height = 720;
+          const isShortOrVertical = isVertical || secs <= 65;
+          const targetW = isShortOrVertical ? 720 : 1280;
+          const targetH = isShortOrVertical ? 1280 : 720;
+          canvas.width = targetW;
+          canvas.height = targetH;
           const ctx = canvas.getContext('2d');
           let frameDataUrl = '';
           if (ctx) {
             ctx.fillStyle = '#090D16';
-            ctx.fillRect(0, 0, 1280, 720);
-            const scale = Math.min(1280 / (video.videoWidth || 1280), 720 / (video.videoHeight || 720));
-            const w = (video.videoWidth || 1280) * scale;
-            const h = (video.videoHeight || 720) * scale;
-            ctx.drawImage(video, (1280 - w) / 2, (720 - h) / 2, w, h);
-            frameDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            ctx.fillRect(0, 0, targetW, targetH);
+            const vidW = video.videoWidth || targetW;
+            const vidH = video.videoHeight || targetH;
+            // Use cover scaling for Shorts so vertical frames fill 9:16 edge-to-edge without black bars
+            const scale = isShortOrVertical
+              ? Math.max(targetW / vidW, targetH / vidH)
+              : Math.min(targetW / vidW, targetH / vidH);
+            const w = vidW * scale;
+            const h = vidH * scale;
+            ctx.drawImage(video, (targetW - w) / 2, (targetH - h) / 2, w, h);
+            frameDataUrl = canvas.toDataURL('image/jpeg', 0.82);
           }
           URL.revokeObjectURL(objUrl);
           resolve({
@@ -1037,7 +1040,7 @@ function uploadSingleBlobToSupabase(
 export async function uploadMediaToEduTubeCloud(
   fileOrBlob: File | Blob,
   fileName: string,
-  folder: 'videos' | 'thumbnails',
+  folder: 'videos' | 'thumbnails' | 'uploads' | 'notes',
   onProgress?: (percent: number) => void
 ): Promise<{ url: string; provider: StorageProviderType }> {
   const cfg = getCloudConfig();
@@ -1208,6 +1211,54 @@ export async function publishEduTubeVideo(
         if (Array.isArray(created) && created[0]) {
           const saved = normalizeVideoRow(created[0]);
           saveLocalVideos([saved, ...current.filter((v) => v.id !== saved.id)]);
+
+          // Automatically broadcast a Global Notification to ALL users in Supabase
+          const notifId = `notif_global_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const notifPayload = {
+            id: notifId,
+            recipientId: 'ALL',
+            senderId: saved.author_uid,
+            senderName: saved.author_name,
+            senderAvatar: saved.author_photo || '',
+            type: 'edutube_video',
+            videoId: saved.id,
+            videoTitle: saved.title,
+            videoType: saved.video_type,
+            targetUrl: '/edutube',
+            isRead: false,
+            createdAtMs: Date.now(),
+          };
+          fetch(`${cfg.supabaseUrl}/rest/v1/edutube_videos`, {
+            method: 'POST',
+            headers: {
+              apikey: cfg.supabaseAnonKey,
+              Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+              'Content-Type': 'application/json',
+              Prefer: 'resolution=merge-duplicates,return=minimal',
+            },
+            body: JSON.stringify({
+              id: notifId,
+              title: 'edutube_video',
+              description: saved.title,
+              video_url: 'blob://hub_notification',
+              thumbnail_url: saved.thumbnail_url || saved.author_photo || '',
+              duration: saved.duration || '00:00',
+              video_type: 'hub_notification',
+              subject: 'edutube_video',
+              chapter: 'ALL',
+              author_uid: saved.author_uid,
+              author_name: saved.author_name,
+              author_username: saved.author_username,
+              author_photo: saved.author_photo || '',
+              views: 0,
+              likes: 0,
+              liked_by: [],
+              comments: [notifPayload],
+              storage_provider: 'supabase',
+              created_at: new Date().toISOString(),
+            }),
+          }).catch(() => {});
+
           return saved;
         }
       }
@@ -1291,6 +1342,7 @@ export async function deleteEduTubeVideoRecord(videoId: string): Promise<void> {
 export function getEmbedInfo(url: string): {
   type: 'youtube' | 'gdrive' | 'video';
   embedUrl: string;
+  youtubeId?: string;
 } {
   if (!url) return { type: 'video', embedUrl: '' };
 
@@ -1298,9 +1350,11 @@ export function getEmbedInfo(url: string): {
     /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
   );
   if (ytMatch && ytMatch[1]) {
+    const videoId = ytMatch[1];
     return {
       type: 'youtube',
-      embedUrl: `https://www.youtube.com/embed/${ytMatch[1]}?rel=0&modestbranding=1`,
+      youtubeId: videoId,
+      embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?controls=0&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1&fs=0&playsinline=1&enablejsapi=1`,
     };
   }
 

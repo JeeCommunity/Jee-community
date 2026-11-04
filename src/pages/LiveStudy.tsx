@@ -19,6 +19,13 @@ import { db } from "../firebase";
 import { getCampusProgress, getDailyCoins, getDailyXP, getCollegeLevelRequired } from "../lib/campusEconomy";
 import { updateSessionWithEconomy } from "../lib/updateSession";
 import { createNotification } from "../lib/notifications";
+import {
+  subscribeSupabaseStudySessions,
+  getSupabaseStudySession,
+  saveSupabaseStudySession,
+  fetchAllSupabaseStudySessions,
+  getCachedUserProfile,
+} from "../lib/supabaseHub";
 import { useAuth } from "../AuthContext";
 import {
   Bell,
@@ -140,15 +147,12 @@ export default function LiveStudy() {
     if (!user) return;
     const fetchUserStats = async () => {
       try {
-        const docSnap = await getDoc(doc(db, "users", user.uid));
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data.campus) {
-            setCampusStats({
-              totalCoins: data.campus.totalCoins || 0,
-              totalXP: data.campus.totalXP || 0
-            });
-          }
+        const cached = await getCachedUserProfile(user.uid);
+        if (cached?.campus) {
+          setCampusStats({
+            totalCoins: cached.campus.totalCoins || 0,
+            totalXP: cached.campus.totalXP || 0,
+          });
         }
       } catch (err) {}
     };
@@ -262,85 +266,20 @@ export default function LiveStudy() {
 
   useEffect(() => {
     if (!user) return;
-    
-    // Polling for the current user's session and all active sessions
-    const todayDate = getLocalDate();
-    const myRef = doc(db, "study_sessions", user.uid);
-    const q = query(collection(db, "study_sessions"), where("dailyDate", "==", todayDate), limit(100));
 
-    const unsubMy = onSnapshot(myRef, (myDocSnap) => {
-        if (myDocSnap.exists()) {
-          setMySession({ id: myDocSnap.id, ...myDocSnap.data() });
-        } else {
-          setMySession(null);
-        }
+    const todayDate = getLocalDate();
+    const unsub = subscribeSupabaseStudySessions(user.uid, todayDate, (allSessions, mine) => {
+      setSessions(allSessions);
+      setMySession(mine);
     });
 
-    const fetchAllSessions = async () => {
-        try {
-          const snap = await getDocs(q);
-          const allSessions: any[] = [];
-          const todayDate = getLocalDate();
-          
-          snap.forEach((docSnap) => {
-            const data = docSnap.data();
-            
-            // Retroactive cleanup of stale sessions (>3 hours)
-            if (data.isStudying && data.startTime) {
-              const elapsedSeconds = Math.floor((Date.now() - data.startTime) / 1000);
-              if (elapsedSeconds >= 3 * 3600) {
-                data.isStudying = false;
-                data.accumulatedTime = Math.min(18 * 3600, (data.accumulatedTime || 0) + (3 * 3600));
-                
-                // Cleanup goals as well
-                if (data.goals && data.activeGoalId) {
-                  data.goals = data.goals.map((g: any) => {
-                    if (g.id === data.activeGoalId) {
-                      return { ...g, accumulatedTime: (g.accumulatedTime || 0) + (3 * 3600) };
-                    }
-                    return g;
-                  });
-                }
-              }
-            }
-            
-            const hasStudiedToday = data.dailyDate === todayDate && (data.accumulatedTime > 0 || data.isStudying);
-            if (data.isStudying || hasStudiedToday) {
-              allSessions.push({ id: docSnap.id, ...data });
-            }
-          });
-
-          setSessions(
-            allSessions.sort((a, b) => {
-              const getSessionTimeLocal = (s: any) => {
-                let total = s.accumulatedTime || 0;
-                if (s.dailyDate !== todayDate) return 0;
-                if (s.isStudying && s.startTime) {
-                  let t = Math.floor((Date.now() - s.startTime) / 1000);
-                  if (t > 3 * 3600) t = 3 * 3600;
-                  total += t;
-                }
-                return total;
-              };
-              return getSessionTimeLocal(b) - getSessionTimeLocal(a);
-            })
-          );
-        } catch (err) {
-          console.error("Error fetching live sessions", err);
-        }
+    (window as any).refreshLiveStudySessions = async () => {
+      const latest = await fetchAllSupabaseStudySessions(getLocalDate());
+      setSessions(latest);
     };
-    
-    fetchAllSessions();
-    // Expose for refresh
-    (window as any).refreshLiveStudySessions = fetchAllSessions;
-    
-    // Refresh leaderboard every 5 minutes to keep it somewhat updated without killing quota
-    const refreshTimer = setInterval(fetchAllSessions, 5 * 60 * 1000);
 
-    
     return () => {
-      unsubMy();
-      clearInterval(refreshTimer);
+      unsub();
     };
   }, [user]);
 
@@ -632,13 +571,11 @@ export default function LiveStudy() {
   const handleStart = async (goalId?: string) => {
     if (!user || !profile) return;
 
-    const ref = doc(db, "study_sessions", user.uid);
-    const snap = await getDoc(ref);
+    const existing = await getSupabaseStudySession(user.uid);
     const todayDate = getLocalDate();
-    
-    if (snap.exists()) {
-      const data = snap.data();
-      const { baseTime } = resolveSessionState(data, todayDate);
+
+    if (existing) {
+      const { baseTime } = resolveSessionState(existing, todayDate);
       if (baseTime >= 18 * 3600) {
         alert("You have reached the maximum study limit of 18 hours for today! Take a break and come back tomorrow.");
         return;
@@ -649,8 +586,8 @@ export default function LiveStudy() {
     setShowCheckIn(false);
     setCheckInCountdown(60);
 
-    if (!snap.exists()) {
-      await setDoc(ref, {
+    if (!existing) {
+      const saved = await saveSupabaseStudySession(user.uid, {
         uid: user.uid,
         fullName: profile.fullName,
         username: profile.username,
@@ -664,19 +601,18 @@ export default function LiveStudy() {
         accumulatedTime: 0,
         dailyDate: todayDate,
         weeklyData: {
-            [todayDate]: { accumulatedTime: 0, goals: mySession?.goals || [] }
+          [todayDate]: { accumulatedTime: 0, goals: mySession?.goals || [] },
         },
-        lastUpdated: serverTimestamp(),
       });
+      setMySession(saved);
       return;
     }
 
-    const data = snap.data();
-    const { baseTime, currentGoals, weeklyData, addedCoins, addedXP } = resolveSessionState(data, todayDate);
-    
+    const { baseTime, currentGoals, weeklyData } = resolveSessionState(existing, todayDate);
     weeklyData[todayDate] = { accumulatedTime: baseTime, goals: currentGoals };
 
-    await updateDoc(ref, {
+    const saved = await saveSupabaseStudySession(user.uid, {
+      ...existing,
       goals: currentGoals,
       isStudying: true,
       activeGoalId: goalId || null,
@@ -689,34 +625,40 @@ export default function LiveStudy() {
       dailyDate: todayDate,
       accumulatedTime: baseTime,
       weeklyData,
-      lastUpdated: serverTimestamp(),
     });
+    setMySession(saved);
   };
 
   const handleStop = async (uidToStop?: string) => {
     setShowCheckIn(false);
     const targetUid = typeof uidToStop === "string" ? uidToStop : user?.uid;
     if (!targetUid) return;
-    const ref = doc(db, "study_sessions", targetUid);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) return;
-    
-    const data = snap.data();
+    const data = await getSupabaseStudySession(targetUid);
+    if (!data) return;
+
     const todayDate = getLocalDate();
-    
-    const { baseTime, currentGoals, weeklyData, addedCoins, addedXP } = resolveSessionState(data, todayDate);
+    const { baseTime, currentGoals, weeklyData, addedCoins, addedXP } = resolveSessionState(
+      data,
+      todayDate
+    );
 
     weeklyData[todayDate] = { accumulatedTime: baseTime, goals: currentGoals };
 
-    await updateSessionWithEconomy(ref, {
-      isStudying: false,
-      activeGoalId: null,
-      accumulatedTime: baseTime,
-      goals: currentGoals,
-      dailyDate: todayDate,
-      weeklyData,
-      lastUpdated: serverTimestamp(),
-    }, addedCoins, addedXP, targetUid);
+    await updateSessionWithEconomy(
+      null,
+      {
+        ...data,
+        isStudying: false,
+        activeGoalId: null,
+        accumulatedTime: baseTime,
+        goals: currentGoals,
+        dailyDate: todayDate,
+        weeklyData,
+      },
+      addedCoins,
+      addedXP,
+      targetUid
+    );
   };
 
   const getGoalTime = (goal: Goal) => {
@@ -737,25 +679,32 @@ export default function LiveStudy() {
 
   const clearGoals = async () => {
     if (!user) return;
-    const ref = doc(db, "study_sessions", user.uid);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) return;
-    const sData = snap.data();
+    const sData = await getSupabaseStudySession(user.uid);
+    if (!sData) return;
     const todayDate = getLocalDate();
-    
-    const { baseTime, currentGoals, weeklyData, activeGoalId, newStartTime, isStudying, addedCoins, addedXP } = resolveSessionState(sData, todayDate);
-    
+
+    const { baseTime, weeklyData, newStartTime, addedCoins, addedXP } = resolveSessionState(
+      sData,
+      todayDate
+    );
+
     weeklyData[todayDate] = { accumulatedTime: baseTime, goals: [] };
 
-    await updateSessionWithEconomy(ref, {
-      goals: [],
-      activeGoalId: null,
-      accumulatedTime: baseTime,
-      dailyDate: todayDate,
-      weeklyData,
-      startTime: newStartTime,
-      lastUpdated: serverTimestamp(),
-    }, addedCoins, addedXP, user.uid);
+    await updateSessionWithEconomy(
+      null,
+      {
+        ...sData,
+        goals: [],
+        activeGoalId: null,
+        accumulatedTime: baseTime,
+        dailyDate: todayDate,
+        weeklyData,
+        startTime: newStartTime,
+      },
+      addedCoins,
+      addedXP,
+      user.uid
+    );
   };
 
   const addGoal = async () => {
@@ -766,12 +715,11 @@ export default function LiveStudy() {
       status: "pending",
       createdAt: Date.now(),
     };
-    const ref = doc(db, "study_sessions", user.uid);
-    const snap = await getDoc(ref);
+    const sData = await getSupabaseStudySession(user.uid);
     const todayDate = getLocalDate();
 
-    if (!snap.exists()) {
-      await setDoc(ref, {
+    if (!sData) {
+      const saved = await saveSupabaseStudySession(user.uid, {
         uid: user.uid,
         fullName: profile?.fullName || "User",
         username: profile?.username || "user",
@@ -785,110 +733,124 @@ export default function LiveStudy() {
         accumulatedTime: 0,
         dailyDate: todayDate,
         weeklyData: {
-            [todayDate]: { accumulatedTime: 0, goals: [newGoal] }
+          [todayDate]: { accumulatedTime: 0, goals: [newGoal] },
         },
-        lastUpdated: serverTimestamp(),
       });
+      setMySession(saved);
     } else {
-      const sData = snap.data();
-      const { baseTime, currentGoals, weeklyData, activeGoalId, newStartTime, isStudying, addedCoins, addedXP } = resolveSessionState(sData, todayDate);
+      const { baseTime, currentGoals, weeklyData, newStartTime, addedCoins, addedXP } =
+        resolveSessionState(sData, todayDate);
       const updatedGoals = [...currentGoals, newGoal];
-      
+
       weeklyData[todayDate] = { accumulatedTime: baseTime, goals: updatedGoals };
-      
-      await updateSessionWithEconomy(ref, { 
+
+      await updateSessionWithEconomy(
+        null,
+        {
+          ...sData,
           goals: updatedGoals,
           accumulatedTime: baseTime,
           dailyDate: todayDate,
           weeklyData,
           startTime: newStartTime,
-          lastUpdated: serverTimestamp()
-      }, addedCoins, addedXP, user.uid);
+        },
+        addedCoins,
+        addedXP,
+        user.uid
+      );
     }
     setGoalInput("");
   };
 
   const updateGoalStatus = async (
     goalId: string,
-    status: "pending" | "completed" | "failed",
+    status: "pending" | "completed" | "failed"
   ) => {
     if (!user) return;
-    const ref = doc(db, "study_sessions", user.uid);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) return;
-    
-    const sData = snap.data();
+    const sData = await getSupabaseStudySession(user.uid);
+    if (!sData) return;
+
     const todayDate = getLocalDate();
-    
-    const { baseTime, currentGoals, weeklyData, activeGoalId, newStartTime, isStudying, addedCoins, addedXP } = resolveSessionState(sData, todayDate);
-    
+    const {
+      baseTime,
+      currentGoals,
+      weeklyData,
+      activeGoalId,
+      newStartTime,
+      addedCoins,
+      addedXP,
+    } = resolveSessionState(sData, todayDate);
+
     const updatedGoals = currentGoals.map((g: Goal) =>
-      g.id === goalId ? { ...g, status } : g,
+      g.id === goalId ? { ...g, status } : g
     );
-    
+
     weeklyData[todayDate] = { accumulatedTime: baseTime, goals: updatedGoals };
-    
-    const updates: any = { 
-        goals: updatedGoals,
-        accumulatedTime: baseTime,
-        dailyDate: todayDate,
-        weeklyData,
-        startTime: newStartTime,
-        lastUpdated: serverTimestamp()
+
+    const updates: any = {
+      ...sData,
+      goals: updatedGoals,
+      accumulatedTime: baseTime,
+      dailyDate: todayDate,
+      weeklyData,
+      startTime: newStartTime,
     };
-    
+
     if (activeGoalId === goalId && status !== "pending") {
       updates.activeGoalId = null;
     }
-    
-    await updateSessionWithEconomy(ref, updates, addedCoins, addedXP, user.uid);
+
+    await updateSessionWithEconomy(null, updates, addedCoins, addedXP, user.uid);
   };
 
   const removeGoal = async (goalId: string) => {
     if (!user) return;
-    const ref = doc(db, "study_sessions", user.uid);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) return;
-    
-    const sData = snap.data();
+    const sData = await getSupabaseStudySession(user.uid);
+    if (!sData) return;
+
     const todayDate = getLocalDate();
-    
-    const { baseTime, currentGoals, weeklyData, activeGoalId, newStartTime, isStudying, addedCoins, addedXP } = resolveSessionState(sData, todayDate);
-    
+    const {
+      baseTime,
+      currentGoals,
+      weeklyData,
+      activeGoalId,
+      newStartTime,
+      addedCoins,
+      addedXP,
+    } = resolveSessionState(sData, todayDate);
+
     const updatedGoals = currentGoals.filter((g: Goal) => g.id !== goalId);
-    
+
     weeklyData[todayDate] = { accumulatedTime: baseTime, goals: updatedGoals };
-    
-    const updates: any = { 
-        goals: updatedGoals,
-        accumulatedTime: baseTime,
-        dailyDate: todayDate,
-        weeklyData,
-        startTime: newStartTime,
-        lastUpdated: serverTimestamp()
+
+    const updates: any = {
+      ...sData,
+      goals: updatedGoals,
+      accumulatedTime: baseTime,
+      dailyDate: todayDate,
+      weeklyData,
+      startTime: newStartTime,
     };
-    
+
     if (activeGoalId === goalId) {
       updates.activeGoalId = null;
     }
-    
-    await updateSessionWithEconomy(ref, updates, addedCoins, addedXP, user.uid);
+
+    await updateSessionWithEconomy(null, updates, addedCoins, addedXP, user.uid);
   };
 
   const handleAdminStopSession = async (uid: string) => {
     if (!user || profile?.role !== "admin") return;
-    const ref = doc(db, "study_sessions", uid);
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-      const s = snap.data();
+    const s = await getSupabaseStudySession(uid);
+    if (s) {
       const timeStudied = s.isStudying
         ? Math.floor((Date.now() - s.startTime) / 1000)
         : 0;
-      await updateDoc(ref, {
+      await saveSupabaseStudySession(uid, {
+        ...s,
         isStudying: false,
         activeGoalId: null,
         accumulatedTime: (s.accumulatedTime || 0) + timeStudied,
-        lastUpdated: serverTimestamp(),
       });
 
       toast.success("User session stopped");

@@ -11,6 +11,15 @@ import { cn, getFirstName } from '../lib/utils';
 import { motion } from 'motion/react';
 import toast from 'react-hot-toast';
 import { renderTextWithLinks } from '../lib/linkify';
+import {
+  fetchSupabaseStudyGroups,
+  getSupabaseStudyGroupByCode,
+  saveSupabaseStudyGroup,
+  addSupabaseGroupMessage,
+  updateSupabaseGroupMessage,
+  subscribeSupabaseGroupMessages,
+  getCachedUserProfile,
+} from '../lib/supabaseHub';
 
 interface PrivateStudyGroupsProps {
   sessions: any[];
@@ -118,9 +127,7 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
     if (!user) return;
     setLoading(true);
     try {
-      const q = query(collection(db, 'study_groups'), where('members', 'array-contains', user.uid));
-      const snap = await getDocs(q);
-      const fetched = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const fetched = await fetchSupabaseStudyGroups(user.uid);
       setGroups(fetched);
     } catch (e) {
       console.error(e);
@@ -136,51 +143,47 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
   // Load members when group selected
   useEffect(() => {
     if (!activeGroup) return;
-    
+
     const fetchMembers = async () => {
-       for (const mId of activeGroup.members || []) {
-           setFetchedUsers(prev => {
-               if (prev[mId] || usersData[mId]) return prev;
-               // Fire and forget fetch
-               getDoc(doc(db, 'users', mId)).then(d => {
-                   if (d.exists()) {
-                       setFetchedUsers(p => ({...p, [mId]: d.data()}));
-                   }
-               }).catch(e => {});
-               return prev; // We don't update state here, the async callback does
-           });
-       }
+      for (const mId of activeGroup.members || []) {
+        setFetchedUsers((prev) => {
+          if (prev[mId] || usersData[mId]) return prev;
+          getCachedUserProfile(mId)
+            .then((d) => {
+              if (d) {
+                setFetchedUsers((p) => ({ ...p, [mId]: d }));
+              }
+            })
+            .catch(() => {});
+          return prev;
+        });
+      }
     };
     fetchMembers();
   }, [activeGroup, usersData]);
 
-
-  // Listen to chat messages if activeGroup exists
+  // Listen to chat messages if activeGroup exists via Supabase Realtime Hub
   useEffect(() => {
     if (!activeGroup?.id || !user?.uid || isChatDisconnected) return;
-    
-    const q = query(
-      collection(db, 'study_groups', activeGroup.id, 'messages'),
-      orderBy('createdAt', 'desc'),
-      limit(50)
-    );
-    
-    const unsubMessages = onSnapshot(q, (snap) => {
-        const msgs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).reverse();
+
+    const unsubMessages = subscribeSupabaseGroupMessages(
+      activeGroup.id,
+      (msgs, latestGroup) => {
         setMessages(msgs);
-        
-        const hasMyNewMessage = snap.docChanges().some(change => change.type === 'added' && change.doc.data().userId === user.uid);
-        
-        if (shouldAutoScrollRef.current || hasMyNewMessage) {
-            setTimeout(() => {
-              if (chatScrollContainerRef.current) {
-                 chatScrollContainerRef.current.scrollTop = chatScrollContainerRef.current.scrollHeight;
-              }
-              shouldAutoScrollRef.current = true;
-            }, 100);
+        if (latestGroup) {
+          setActiveGroup((prev: any) => (prev ? { ...prev, ...latestGroup } : prev));
         }
-    });
-    
+        if (shouldAutoScrollRef.current) {
+          setTimeout(() => {
+            if (chatScrollContainerRef.current) {
+              chatScrollContainerRef.current.scrollTop =
+                chatScrollContainerRef.current.scrollHeight;
+            }
+          }, 80);
+        }
+      }
+    );
+
     return () => unsubMessages();
   }, [activeGroup?.id, user?.uid, isChatDisconnected]);
 
@@ -221,7 +224,7 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
 
   const handleCreateGroup = async () => {
     if (!createName.trim()) return;
-    const createdGroups = groups.filter(g => g.creatorId === user?.uid);
+    const createdGroups = groups.filter((g) => g.creatorId === user?.uid);
     if (createdGroups.length > 0) {
       toast.error("You can only create one group.");
       return;
@@ -230,14 +233,16 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
     try {
       const shortCode = "GC-" + Math.random().toString(36).substr(2, 5).toUpperCase();
       const groupData = {
+        id: shortCode,
         name: createName.trim(),
         creatorId: user?.uid,
         shortCode,
         members: [user?.uid],
-        createdAt: serverTimestamp(),
-        pinnedMessageId: null
+        createdAtMs: Date.now(),
+        pinnedMessageId: null,
+        messages: [],
       };
-      await setDoc(doc(db, 'study_groups', shortCode), groupData);
+      await saveSupabaseStudyGroup(groupData);
       toast.success("Group created!");
       setIsCreating(false);
       setCreateName("");
@@ -248,22 +253,22 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
   };
 
   const handleJoinGroup = async () => {
-    if (!joinCode.trim()) return;
+    if (!joinCode.trim() || !user) return;
     const code = joinCode.trim().toUpperCase();
     try {
-      const q = query(collection(db, 'study_groups'), where('shortCode', '==', code));
-      const snap = await getDocs(q);
-      if (snap.empty) {
+      const groupDoc = await getSupabaseStudyGroupByCode(code);
+      if (!groupDoc) {
         toast.error("Group not found");
         return;
       }
-      const groupDoc = snap.docs[0];
-      if (groupDoc.data().members.includes(user?.uid)) {
+      if (Array.isArray(groupDoc.members) && groupDoc.members.includes(user.uid)) {
         toast.error("You are already in this group");
         return;
       }
-      await updateDoc(groupDoc.ref, {
-        members: arrayUnion(user?.uid)
+      const nextMembers = [...(groupDoc.members || []), user.uid];
+      await saveSupabaseStudyGroup({
+        ...groupDoc,
+        members: nextMembers,
       });
       toast.success("Joined group!");
       setIsJoining(false);
@@ -274,17 +279,17 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
     }
   };
 
-  
   const handleKickMember = async (memberId: string, memberName: string) => {
     if (!activeGroup || activeGroup.creatorId !== user?.uid) return;
     if (!window.confirm(`Are you sure you want to remove ${memberName} from the group?`)) return;
-    
+
     try {
-      await updateDoc(doc(db, 'study_groups', activeGroup.id), {
-        members: arrayRemove(memberId)
+      const newMembers = (activeGroup.members || []).filter((id: string) => id !== memberId);
+      await saveSupabaseStudyGroup({
+        ...activeGroup,
+        members: newMembers,
       });
       toast.success(`${memberName} removed`);
-      const newMembers = activeGroup.members.filter((id: string) => id !== memberId);
       setActiveGroup({ ...activeGroup, members: newMembers });
       fetchGroups();
     } catch (e) {
@@ -295,9 +300,14 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
   const handleLeaveGroup = async (groupId: string) => {
     if (!window.confirm("Are you sure you want to leave this study group?")) return;
     try {
-      await updateDoc(doc(db, 'study_groups', groupId), {
-        members: arrayRemove(user?.uid)
-      });
+      const group = await getSupabaseStudyGroupByCode(groupId);
+      if (group) {
+        const nextMembers = (group.members || []).filter((id: string) => id !== user?.uid);
+        await saveSupabaseStudyGroup({
+          ...group,
+          members: nextMembers,
+        });
+      }
       toast.success("Left group");
       setActiveGroup(null);
       fetchGroups();
@@ -306,80 +316,79 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
     }
   };
 
-  
   const handleUpdateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editGroupName.trim() || !activeGroup || activeGroup.creatorId !== user?.uid) return;
     try {
-      await updateDoc(doc(db, 'study_groups', activeGroup.id), {
+      const updated = await saveSupabaseStudyGroup({
+        ...activeGroup,
         name: editGroupName.trim(),
-        photoURL: editGroupPhoto.trim() || null
+        photoURL: editGroupPhoto.trim() || null,
       });
       toast.success("Group updated!");
       setIsEditingGroup(false);
-      setActiveGroup({...activeGroup, name: editGroupName.trim(), photoURL: editGroupPhoto.trim() || null});
+      setActiveGroup(updated);
       fetchGroups();
     } catch (err) {
       toast.error("Error updating group");
     }
   };
 
-  
   const handleStartMeet = async () => {
     if (!activeGroup || !user) return;
     try {
-      toast.loading("Starting video call...", { id: 'meet-start' });
-      const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
-      const { auth } = await import('../firebase');
+      toast.loading("Starting video call...", { id: "meet-start" });
+      const { signInWithPopup, GoogleAuthProvider } = await import("firebase/auth");
+      const { auth } = await import("../firebase");
       const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/meetings.space.created');
+      provider.addScope("https://www.googleapis.com/auth/meetings.space.created");
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (!credential?.accessToken) throw new Error("Could not get access token");
 
-      const response = await fetch('https://meet.googleapis.com/v2/spaces', {
-        method: 'POST',
+      const response = await fetch("https://meet.googleapis.com/v2/spaces", {
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${credential.accessToken}`,
-          'Content-Type': 'application/json'
+          Authorization: `Bearer ${credential.accessToken}`,
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify({})
+        body: JSON.stringify({}),
       });
-      
+
       const meetData = await response.json();
       if (!response.ok) throw new Error(meetData.error?.message || "Failed to create meeting");
 
-      await addDoc(collection(db, 'study_groups', activeGroup.id, 'messages'), {
+      await addSupabaseGroupMessage(activeGroup.id, {
         text: `Join the Video Call! 📹\n${meetData.meetingUri}`,
         userId: user.uid,
         userName: profile?.fullName || profile?.username || "Unknown",
         userPhoto: profile?.photoURL || null,
-        createdAt: serverTimestamp(),
-        type: 'meet',
+        type: "meet",
         meetUri: meetData.meetingUri,
         isToxic: false,
-        toxicWords: []
+        toxicWords: [],
       });
-      
-      toast.success("Video call started!", { id: 'meet-start' });
+
+      toast.success("Video call started!", { id: "meet-start" });
     } catch (e: any) {
       console.warn("Google Meet creation failed, falling back to instant Jitsi Meet:", e);
       try {
         const jitsiUrl = `https://meet.jit.si/JEECommunityGroup-${activeGroup.id}`;
-        await addDoc(collection(db, 'study_groups', activeGroup.id, 'messages'), {
+        await addSupabaseGroupMessage(activeGroup.id, {
           text: `Join the Instant Study Video Call! 📹\n${jitsiUrl}`,
           userId: user.uid,
           userName: profile?.fullName || profile?.username || "Unknown",
           userPhoto: profile?.photoURL || null,
-          createdAt: serverTimestamp(),
-          type: 'meet',
+          type: "meet",
           meetUri: jitsiUrl,
           isToxic: false,
-          toxicWords: []
+          toxicWords: [],
         });
-        toast.success("Instant video call link created!", { id: 'meet-start' });
+        toast.success("Instant video call link created!", { id: "meet-start" });
       } catch (fallbackErr: any) {
-        toast.error("Failed to start video call: " + (fallbackErr.message || "Unknown error"), { id: 'meet-start' });
+        toast.error("Failed to start video call: " + (fallbackErr.message || "Unknown error"), {
+          id: "meet-start",
+        });
       }
     }
   };
@@ -387,115 +396,109 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !activeGroup || !user || !profile) return;
-    
+
     const messageText = newMessage.trim();
     const toxicWordsFound = getToxicWords(messageText);
     const isToxic = toxicWordsFound.length > 0;
-    
+
     try {
-      await addDoc(collection(db, 'study_groups', activeGroup.id, 'messages'), {
+      shouldAutoScrollRef.current = true;
+      await addSupabaseGroupMessage(activeGroup.id, {
         text: messageText,
         userId: user.uid,
         userName: profile.fullName || profile.username || "Unknown",
         userPhoto: profile.photoURL || null,
-        createdAt: serverTimestamp(),
         replyToId: replyingTo?.id || null,
         replyToText: replyingTo?.text || null,
         replyToUser: replyingTo?.userName || null,
-        type: 'text',
-        isToxic: isToxic,
-        toxicWords: toxicWordsFound
+        type: "text",
+        isToxic,
+        toxicWords: toxicWordsFound,
       });
-      
-      // Moderation Check
-      if (isToxic) {
-         updateDoc(doc(db, 'study_groups', activeGroup.id), { needsAdminAttention: true }).catch(console.error);
-      }
-      
+
       setNewMessage("");
       setReplyingTo(null);
     } catch (e) {
       toast.error("Error sending message");
     }
   };
-  
+
   const handleSaveEdit = async (msgId: string) => {
     if (!editMessageText.trim() || !activeGroup) return;
     try {
-      await updateDoc(doc(db, 'study_groups', activeGroup.id, 'messages', msgId), {
-        text: editMessageText.trim()
+      await updateSupabaseGroupMessage(activeGroup.id, msgId, {
+        text: editMessageText.trim(),
       });
       setEditingMessageId(null);
       setEditMessageText("");
     } catch (err) {
-      toast.error('Failed to edit message');
+      toast.error("Failed to edit message");
     }
   };
 
   const handleDeleteMessage = async (msgId: string) => {
     if (!activeGroup || !user) return;
     try {
-      await updateDoc(doc(db, 'study_groups', activeGroup.id, 'messages', msgId), { isDeleted: true });
+      await updateSupabaseGroupMessage(activeGroup.id, msgId, { isDeleted: true });
     } catch (err) {
-      toast.error('Failed to delete message');
+      toast.error("Failed to delete message");
     }
   };
 
   const handlePinMessage = async (msgId: string) => {
-     try {
-       await updateDoc(doc(db, 'study_groups', activeGroup.id), {
-          pinnedMessageId: msgId
-       });
-       setActiveGroup({...activeGroup, pinnedMessageId: msgId});
-       toast.success("Message pinned");
-     } catch (e) {
-       toast.error("Error pinning message");
-     }
+    try {
+      const updated = await saveSupabaseStudyGroup({
+        ...activeGroup,
+        pinnedMessageId: msgId,
+      });
+      setActiveGroup(updated);
+      toast.success("Message pinned");
+    } catch (e) {
+      toast.error("Error pinning message");
+    }
   };
-  
+
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  
+
   const handleFileClick = () => {
-     fileInputRef.current?.click();
+    fileInputRef.current?.click();
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const target = e.target;
-      const file = target.files?.[0];
-      if (!file) return;
-      if (file.size > 10 * 1024 * 1024) {
-          toast.error("File size must be less than 10MB");
-          return;
-      }
-      
-      setIsUploading(true);
-      const loadingToast = toast.loading("Uploading file...");
-      
-      try {
-          // Use centralized uploader (which handles compression and Firebase storage internally)
-          const fileUrl = await uploadFileToCloudinary(file);
-          
-          await addDoc(collection(db, 'study_groups', activeGroup.id, 'messages'), {
-             text: "",
-             userId: user?.uid,
-             userName: profile?.fullName || profile?.username || "Unknown",
-             userPhoto: profile?.photoURL || null,
-             createdAt: serverTimestamp(),
-             fileUrl: fileUrl,
-             fileName: file.name,
-             fileType: file.type,
-             type: file.type.startsWith('image/') ? 'image' : 'file'
-          });
-          
-          toast.success("File sent!");
-      } catch(error: any) {
-          console.error("Upload error:", error);
-          toast.error(error?.message || "Failed to upload file");
-      } finally {
-          setIsUploading(false);
-          toast.dismiss(loadingToast);
-          target.value = '';
-      }
+    const target = e.target;
+    const file = target.files?.[0];
+    if (!file) return;
+    if (file.size > 40 * 1024 * 1024) {
+      toast.error("File size must be less than 40MB");
+      return;
+    }
+
+    setIsUploading(true);
+    const loadingToast = toast.loading("Uploading file to Supabase Cloud...");
+
+    try {
+      const fileUrl = await uploadFileToCloudinary(file);
+
+      await addSupabaseGroupMessage(activeGroup.id, {
+        text: "",
+        userId: user?.uid,
+        userName: profile?.fullName || profile?.username || "Unknown",
+        userPhoto: profile?.photoURL || null,
+        fileUrl,
+        fileName: file.name,
+        fileType: file.type,
+        type: file.type.startsWith("image/") ? "image" : "file",
+      });
+
+      toast.success("File sent!");
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      toast.error(error?.message || "Failed to upload file");
+    } finally {
+      setIsUploading(false);
+      toast.dismiss(loadingToast);
+      target.value = "";
+    }
   };
 
   if (loading) {

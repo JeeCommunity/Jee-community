@@ -9,6 +9,13 @@ import { collection, addDoc, getDocs, getDoc, query, where, orderBy, serverTimes
 import { uploadFileToCloudinary } from '../lib/cloudinary';
 import toast from 'react-hot-toast';
 import { renderTextWithLinks } from '../lib/linkify';
+import {
+  fetchSupabaseNotes,
+  createSupabaseNote,
+  incrementSupabaseNoteViews,
+  deleteSupabaseNote,
+  getCachedUserProfile,
+} from '../lib/supabaseHub';
 
 const CATEGORIES = [
   { id: 'books', title: 'Books PDF', icon: BookOpen, desc: 'Textbooks, Reference Books' },
@@ -56,44 +63,35 @@ export default function NotesHub() {
     if (!selectedCategory || !selectedSubject) return;
     setLoading(true);
     try {
-      const q = query(
-        collection(db, 'notes_hub'),
-        where('category', '==', selectedCategory),
-        where('subject', '==', selectedSubject)
-      );
-      const snap = await getDocs(q);
-      const fetched: any[] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const fetched = await fetchSupabaseNotes(selectedCategory, selectedSubject);
 
       try {
-        const userIds = [...new Set(fetched.map((n: any) => n.uploadedBy?.uid).filter(Boolean))];
+        const userIds = [
+          ...new Set(fetched.map((n: any) => n.uploadedBy?.uid).filter(Boolean)),
+        ] as string[];
         const userProfiles: any = {};
-        await Promise.all(userIds.map(async (uid) => {
-           const uSnap = await getDoc(doc(db, 'users', uid));
-           if (uSnap.exists()) {
-               userProfiles[uid] = uSnap.data();
-           }
-        }));
+        await Promise.all(
+          userIds.map(async (uid) => {
+            const u = await getCachedUserProfile(uid);
+            if (u) {
+              userProfiles[uid] = u;
+            }
+          })
+        );
         fetched.forEach((note) => {
-           if (note.uploadedBy?.uid && userProfiles[note.uploadedBy.uid]) {
-               const u = userProfiles[note.uploadedBy.uid];
-               note.uploadedBy.name = u.fullName || u.username || note.uploadedBy.name;
-               note.uploadedBy.avatar = u.photoURL || note.uploadedBy.avatar;
-           }
+          if (note.uploadedBy?.uid && userProfiles[note.uploadedBy.uid]) {
+            const u = userProfiles[note.uploadedBy.uid];
+            note.uploadedBy.name = u.fullName || u.username || note.uploadedBy.name;
+            note.uploadedBy.avatar = u.photoURL || note.uploadedBy.avatar;
+          }
         });
       } catch (profileErr) {
-        console.error("Error fetching profiles", profileErr);
+        console.error('Error fetching profiles', profileErr);
       }
 
-      // Client-side sort by createdAt descending to avoid composite index error
-      fetched.sort((a: any, b: any) => {
-        const timeA = a.createdAt?.toMillis() || 0;
-        const timeB = b.createdAt?.toMillis() || 0;
-        return timeB - timeA;
-      });
-      
       setNotes(fetched);
     } catch (err) {
-      console.error("Error fetching notes", err);
+      console.error('Error fetching notes', err);
     }
     setLoading(false);
   };
@@ -108,7 +106,7 @@ export default function NotesHub() {
     let interval: any;
     if (adTimer > 0) {
       interval = setInterval(() => {
-        setAdTimer(t => t - 1);
+        setAdTimer((t) => t - 1);
       }, 1000);
     }
     return () => clearInterval(interval);
@@ -117,90 +115,92 @@ export default function NotesHub() {
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadForm.title || !selectedCategory || !selectedSubject || !user) return;
-    
+
     if (uploadMode === 'file' && !selectedFile) return;
     if (uploadMode === 'link' && !uploadForm.linkUrl) return;
-        
-    setLinkError(false); setIsUploading(true);
+
+    setLinkError(false);
+    setIsUploading(true);
     try {
       let fileUrl = '';
-      
+
       if (uploadMode === 'file') {
-         if (selectedFile!.size > 10 * 1024 * 1024) {
-            toast.error("This file is too large (over 10MB). Please switch to 'Paste Link' mode and use a Google Drive link.");
-            setIsUploading(false);
-            return;
-         }
-         // 1. Upload file securely (Uses configured limits to save storage)
-         fileUrl = await uploadFileToCloudinary(selectedFile!);
+        if (selectedFile!.size > 100 * 1024 * 1024) {
+          toast.error(
+            "This file is over 100MB. Please switch to 'Paste Link' mode and use a Google Drive link."
+          );
+          setIsUploading(false);
+          return;
+        }
+        // Upload directly to Supabase Storage (`edutube-media/notes/`)
+        fileUrl = await uploadFileToCloudinary(selectedFile!, { folder: 'notes' });
       } else {
-         if (uploadForm.linkUrl.includes('drive.google.com')) {
-           try {
-             const res = await fetch('/api/check-drive-link', {
-               method: 'POST',
-               headers: { 'Content-Type': 'application/json' },
-               body: JSON.stringify({ url: uploadForm.linkUrl })
-             });
-             if (res.ok) {
-               const data = await res.json();
-               if (typeof data.error === 'string') {
-                 alert(data.error);
-                 setIsUploading(false);
-                 return;
-               }
-               if (data.isPublic === false) {
-                 setLinkError(true);
-                 setIsUploading(false);
-                 return;
-               }
-             }
-           } catch (e) {
-             console.error("Link check failed", e);
-           }
-         }
-         fileUrl = uploadForm.linkUrl;
-      }
-      
-      if (!fileUrl || !fileUrl.startsWith('http')) {
-         throw new Error("Upload failed or invalid link provided");
+        if (uploadForm.linkUrl.includes('drive.google.com')) {
+          try {
+            const res = await fetch('/api/check-drive-link', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: uploadForm.linkUrl }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (typeof data.error === 'string') {
+                alert(data.error);
+                setIsUploading(false);
+                return;
+              }
+              if (data.isPublic === false) {
+                setLinkError(true);
+                setIsUploading(false);
+                return;
+              }
+            }
+          } catch (e) {
+            console.error('Link check failed', e);
+          }
+        }
+        fileUrl = uploadForm.linkUrl;
       }
 
-      // 2. Save metadata to Firebase
-      await addDoc(collection(db, 'notes_hub'), {
+      if (!fileUrl || !fileUrl.startsWith('http')) {
+        throw new Error('Upload failed or invalid link provided');
+      }
+
+      // Save to Supabase & automatically broadcast Global Notification to all users
+      await createSupabaseNote({
         title: uploadForm.title,
         description: uploadForm.description,
         category: selectedCategory,
         subject: selectedSubject,
-        fileUrl: fileUrl,
+        fileUrl,
         uploadedBy: {
           uid: user.uid,
           name: profile?.fullName || profile?.username || user.displayName || 'User',
-          avatar: profile?.photoURL || user.photoURL || null
+          avatar: profile?.photoURL || user.photoURL || null,
         },
-        createdAt: serverTimestamp(),
-        downloads: 0,
-        views: 0
       });
-      
+
       setIsUploadModalOpen(false);
       setUploadForm({ title: '', description: '', linkUrl: '' });
       setSelectedFile(null);
       fetchNotes();
-      
-      toast.success(uploadMode === 'link' ? 'Link added successfully!' : 'File uploaded successfully!');
+
+      toast.success(
+        uploadMode === 'link'
+          ? 'Link added & everyone notified! 🔔'
+          : 'PDF uploaded to Supabase Cloud & everyone notified! 🔔'
+      );
     } catch (err: any) {
       console.error(err);
-      toast.error(err.message || "Error uploading file. Please try a smaller file or try again later.");
+      toast.error(
+        err.message || 'Error uploading file. Please try a smaller file or try again later.'
+      );
     }
     setIsUploading(false);
   };
 
   const handleNoteClick = async (note: any) => {
-    // Increment views
-    try {
-      await updateDoc(doc(db, 'notes_hub', note.id), { views: increment(1) });
-    } catch (e) {}
-    
+    incrementSupabaseNoteViews(note).catch(() => {});
     setViewingNote(note);
     setAdTimer(5);
   };
@@ -211,10 +211,10 @@ export default function NotesHub() {
 
   const confirmDeleteNote = async () => {
     if (!noteToDelete) return;
-    
+
     try {
-      await deleteDoc(doc(db, 'notes_hub', noteToDelete));
-      setNotes(notes.filter(n => n.id !== noteToDelete));
+      await deleteSupabaseNote(noteToDelete);
+      setNotes(notes.filter((n) => n.id !== noteToDelete));
       toast.success('Resource deleted successfully!');
     } catch (err: any) {
       console.error(err);

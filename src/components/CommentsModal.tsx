@@ -26,6 +26,12 @@ import { createNotification } from '../lib/notifications';
 import toast from 'react-hot-toast';
 import { logManagerAction } from '../lib/managerLogs';
 import { renderTextWithLinks } from '../lib/linkify';
+import {
+  subscribeSupabasePostComments,
+  saveSupabasePostComment,
+  updateSupabaseCommunityPost,
+  getCachedUserProfile,
+} from '../lib/supabaseHub';
 
 interface Comment {
   id: string;
@@ -60,42 +66,22 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
 
   useEffect(() => {
     if (!isOpen) return;
-    
-    // Prevent background scrolling
+
     document.body.style.overflow = 'hidden';
-    
-    const q = query(
-      collection(db, 'comments'),
-      where('postId', '==', post.id)
+
+    const unsubscribe = subscribeSupabasePostComments(
+      post.id,
+      post.authorId,
+      (fetchedComments) => {
+        setComments(fetchedComments);
+      }
     );
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const commentsData: any[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
-      const fetchedComments = commentsData.sort((a: any, b: any) => {
-         // Admin comments first
-         if (a.isAdmin && !b.isAdmin) return -1;
-         if (!a.isAdmin && b.isAdmin) return 1;
-         // Then original author
-         if (a.authorId === post.authorId && b.authorId !== post.authorId) return -1;
-         if (a.authorId !== post.authorId && b.authorId === post.authorId) return 1;
-         // Then by votes
-         const aVotes = (a.upvotes || 0) - (a.downvotes || 0);
-         const bVotes = (b.upvotes || 0) - (b.downvotes || 0);
-         if (aVotes !== bVotes) return bVotes - aVotes;
-         // Finally chronological
-         const aDate = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
-         const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
-         return aDate.getTime() - bDate.getTime();
-      });
-      setComments(fetchedComments);
-    });
 
     return () => {
       document.body.style.overflow = '';
       unsubscribe();
     };
-  }, [isOpen, post.id]);
+  }, [isOpen, post.id, post.authorId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,37 +93,44 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
       if (imageFile) {
         imageUrl = await uploadFileToCloudinary(imageFile);
       }
-      
-      
+
       const toxicWordsFound = getToxicWords(newComment.trim());
       const isToxic = toxicWordsFound.length > 0;
-      
+
       const newCommentData: any = {
-        isToxic: isToxic,
+        isToxic,
         toxicWords: toxicWordsFound,
         text: newComment.trim(),
         authorId: sendAsChulbul ? 'inspector-chulbul-bot' : user.uid,
+        authorName: sendAsChulbul
+          ? 'Inspector Chulbul 👮‍♂️'
+          : profile?.fullName || profile?.username || 'Student',
+        authorPhoto: sendAsChulbul ? '/chulbul.png' : profile?.photoURL || '',
         postId: post.id,
-        createdAt: serverTimestamp(),
+        createdAtMs: Date.now(),
         parentId: replyingTo ? replyingTo.id : null,
         likesCount: 0,
         likedBy: [],
       };
-      
+
       if (imageUrl) {
         newCommentData.imageUrl = imageUrl;
       }
-      
-      const commentDocRef = await addDoc(collection(db, 'comments'), newCommentData);
-      
-      await updateDoc(doc(db, 'posts', post.id), {
-        commentsCount: (post.commentsCount || 0) + 1
+
+      await saveSupabasePostComment(newCommentData);
+
+      const nextCount = (post.commentsCount || comments.length || 0) + 1;
+      post.commentsCount = nextCount;
+      await updateSupabaseCommunityPost(post.id, post, {
+        commentsCount: nextCount,
       });
-      
+
       if (profile && user) {
         const notifySenderId = sendAsChulbul ? 'inspector-chulbul-bot' : user.uid;
-        const notifySenderName = sendAsChulbul ? 'Inspector Chulbul 👮‍♂️' : (profile.fullName || 'User');
-        const notifySenderAvatar = sendAsChulbul ? '/chulbul.png' : (profile.photoURL || '');
+        const notifySenderName = sendAsChulbul
+          ? 'Inspector Chulbul 👮‍♂️'
+          : profile.fullName || 'User';
+        const notifySenderAvatar = sendAsChulbul ? '/chulbul.png' : profile.photoURL || '';
 
         if (replyingTo && replyingTo.authorId !== notifySenderId) {
           createNotification({
@@ -148,7 +141,7 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
             type: 'reply',
             postId: post.id,
             commentId: replyingTo.id,
-            commentContent: newCommentData.text
+            commentContent: newCommentData.text,
           });
         } else if (post.authorId !== notifySenderId) {
           createNotification({
@@ -158,8 +151,8 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
             senderAvatar: notifySenderAvatar,
             type: 'comment',
             postId: post.id,
-            postContent: post.content,
-            commentContent: newCommentData.text
+            postContent: post.text || post.content,
+            commentContent: newCommentData.text,
           });
         }
       }
@@ -547,14 +540,24 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
   if ((comment as any).isDeleted && isCommentOwner) return null;
 
   useEffect(() => {
+    let active = true;
+    if ((comment as any).authorName) {
+      setAuthor({
+        fullName: (comment as any).authorName,
+        photoURL: (comment as any).authorPhoto || '',
+      });
+    }
     const fetchAuthor = async () => {
-      const docRef = doc(db, 'users', comment.authorId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setAuthor(docSnap.data());
+      if (comment.authorId === 'inspector-chulbul-bot') return;
+      const cached = await getCachedUserProfile(comment.authorId);
+      if (active && cached) {
+        setAuthor(cached);
       }
     };
     fetchAuthor();
+    return () => {
+      active = false;
+    };
   }, [comment.authorId]);
 
   useEffect(() => {
@@ -569,28 +572,43 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
 
   const handleLike = async () => {
     if (!user) return;
-    const commentRef = doc(db, 'comments', comment.id);
-    if (isLiked) {
-      await updateDoc(commentRef, {
-        likedBy: arrayRemove(user.uid),
-        likesCount: Math.max(0, (comment.likesCount || 0) - 1)
-      });
-    } else {
-      await updateDoc(commentRef, {
-        likedBy: arrayUnion(user.uid),
-        likesCount: (comment.likesCount || 0) + 1
-      });
-    }
+    const currentLikedBy: string[] = Array.isArray((comment as any).likedBy)
+      ? (comment as any).likedBy
+      : [];
+    const nextLikedBy = isLiked
+      ? currentLikedBy.filter((id) => id !== user.uid)
+      : Array.from(new Set([...currentLikedBy, user.uid]));
+    const nextCount = isLiked
+      ? Math.max(0, (comment.likesCount || 0) - 1)
+      : (comment.likesCount || 0) + 1;
+
+    await saveSupabasePostComment({
+      ...comment,
+      likedBy: nextLikedBy,
+      likesCount: nextCount,
+    });
   };
 
   const handleDelete = async () => {
     if (!canDelete) return;
     try {
-      await updateDoc(doc(db, 'comments', comment.id), { isDeleted: true });
-      await updateDoc(doc(db, 'posts', post.id), {
-        commentsCount: Math.max(0, (post.commentsCount || 0) - 1)
+      await saveSupabasePostComment({
+        ...comment,
+        isDeleted: true,
       });
-      if (!isAdmin && !isCommentOwner && !isPostOwner && canManagerDeleteComment && user && profile) {
+      const nextCount = Math.max(0, (post.commentsCount || 1) - 1);
+      post.commentsCount = nextCount;
+      await updateSupabaseCommunityPost(post.id, post, {
+        commentsCount: nextCount,
+      });
+      if (
+        !isAdmin &&
+        !isCommentOwner &&
+        !isPostOwner &&
+        canManagerDeleteComment &&
+        user &&
+        profile
+      ) {
         await logManagerAction({
           managerId: user.uid,
           managerName: profile.fullName || profile.username || 'Manager',
@@ -605,7 +623,7 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
       }
       toast.success('Comment deleted');
     } catch (error: any) {
-      console.error("Error deleting comment:", error?.message || 'Error');
+      console.error('Error deleting comment:', error?.message || 'Error');
     }
   };
 
@@ -650,20 +668,16 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
     
     setIsSaving(true);
     try {
-      const updates: any = {
+      await saveSupabasePostComment({
+        ...comment,
         text: editedText.trim(),
-        updatedAt: serverTimestamp()
-      };
-      if (editedImageUrl !== comment.imageUrl) {
-        updates.imageUrl = editedImageUrl || null;
-      }
-      await updateDoc(doc(db, 'comments', comment.id), updates);
+        imageUrl: editedImageUrl !== comment.imageUrl ? editedImageUrl || null : comment.imageUrl,
+      });
       setIsEditing(false);
-      // update local comment state since we are no longer using onSnapshot
-      comment.imageUrl = editedImageUrl;
+      comment.imageUrl = editedImageUrl || undefined;
       comment.text = editedText.trim();
-    } catch (error) {
-      console.error("Error editing comment:", error?.message || 'Error');
+    } catch (error: any) {
+      console.error('Error editing comment:', error?.message || 'Error');
     } finally {
       setIsSaving(false);
     }

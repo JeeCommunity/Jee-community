@@ -1,19 +1,22 @@
 import { storage } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { uploadMediaToEduTubeCloud } from './edutube';
 
 export interface UploadOptions {
   maxDimension?: number;
   quality?: number;
+  folder?: 'uploads' | 'notes' | 'thumbnails' | 'videos';
+  onProgress?: (percent: number) => void;
 }
 
 /**
  * Compresses an image file using HTML5 Canvas into a compact JPEG Blob & DataURL.
- * Ensures fast uploads and guarantees Base64 fallbacks stay well under Firestore's 1MB limit.
+ * Reduces 5 MB camera photos down to ~70 KB so cloud storage never fills up.
  */
 async function compressImage(
   file: File,
-  maxDimension = 900,
-  quality = 0.78
+  maxDimension = 1080,
+  quality = 0.8
 ): Promise<{ blob: Blob; dataUrl: string }> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -70,25 +73,45 @@ export const uploadFileToCloudinary = async (
   file: File,
   options?: UploadOptions
 ): Promise<string> => {
-  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
-
   const isImage = file.type.startsWith('image/');
   let compressedData: { blob: Blob; dataUrl: string } | null = null;
 
-  if (isImage) {
+  if (isImage && file.type !== 'image/svg+xml' && file.type !== 'image/gif') {
     try {
       compressedData = await compressImage(
         file,
-        options?.maxDimension ?? 900,
-        options?.quality ?? 0.78
+        options?.maxDimension ?? 1080,
+        options?.quality ?? 0.8
       );
     } catch (err) {
       console.warn('Image compression skipped, using original file:', err);
     }
   }
 
-  // 1. Try Cloudinary first if configured
+  // 1. Primary Cloud Storage: Supabase Storage (`edutube-media` public bucket)
+  try {
+    const targetBlob = compressedData ? compressedData.blob : file;
+    const ext = isImage ? 'jpg' : file.name.split('.').pop() || 'bin';
+    const baseName = file.name.replace(/\.[^/.]+$/, '').slice(0, 40) || 'file';
+    const fileName = `${baseName}.${ext}`;
+    const folder = options?.folder || (file.type === 'application/pdf' ? 'notes' : 'uploads');
+
+    const uploaded = await uploadMediaToEduTubeCloud(
+      targetBlob,
+      fileName,
+      folder,
+      options?.onProgress
+    );
+    if (uploaded?.url) {
+      return uploaded.url;
+    }
+  } catch (supaErr) {
+    console.warn('Supabase Storage upload fallback:', supaErr);
+  }
+
+  // 2. Secondary Cloud Storage: Cloudinary (if configured)
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
   if (cloudName && uploadPreset) {
     try {
       const formData = new FormData();
@@ -107,13 +130,12 @@ export const uploadFileToCloudinary = async (
         const data = await response.json();
         return data.secure_url;
       }
-      console.warn('Cloudinary upload failed, falling back...');
     } catch (error) {
       console.warn('Error uploading to Cloudinary, falling back:', error);
     }
   }
 
-  // 2. Fallback to Firebase Storage with a short timeout (4 seconds)
+  // 3. Fallback to Firebase Storage with a short timeout (4 seconds)
   try {
     const uploadPromise = async () => {
       const ext = isImage ? 'jpg' : file.name.split('.').pop() || 'bin';
@@ -133,13 +155,7 @@ export const uploadFileToCloudinary = async (
     );
 
     return await Promise.race([uploadPromise(), timeoutPromise]);
-  } catch (storageError) {
-    console.warn(
-      'Firebase storage failed or timed out, using compressed Base64 fallback:',
-      storageError
-    );
-
-    // 3. Final Fallback: Compressed Base64 Data URL for images, or FileReader for small files
+  } catch {
     if (compressedData?.dataUrl) {
       return compressedData.dataUrl;
     }

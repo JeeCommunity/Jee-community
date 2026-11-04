@@ -7,6 +7,7 @@ import { useAuth } from '../AuthContext';
 import { getToxicWords } from '../lib/moderation';
 import { cn } from '../lib/utils';
 import { uploadFileToCloudinary } from '../lib/cloudinary';
+import { saveSupabaseCommunityPost } from '../lib/supabaseHub';
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -110,8 +111,15 @@ export default function CreatePostModal({ isOpen, onClose, onSuccess, currentCom
         postData.pdfUrl = String(pdfUrl);
       }
 
-      const docRef = await addDoc(collection(db, 'posts'), postData);
-      
+      const savedPost = await saveSupabaseCommunityPost(
+        postData,
+        true,
+        profile || {
+          fullName: user.displayName || 'Student',
+          username: 'student',
+          photoURL: user.photoURL || '',
+        }
+      );
 
       fetch('/api/admin/stats/posts/increment', { method: 'POST' }).catch(console.error);
       setText('');
@@ -119,7 +127,7 @@ export default function CreatePostModal({ isOpen, onClose, onSuccess, currentCom
       setPdfFile(null);
       setIsPoll(false);
       setPollOptions(['', '']);
-      onSuccess({ id: docRef.id, ...postData, createdAt: new Date() });
+      onSuccess(savedPost);
       onClose();
     } catch (err: any) {
       console.error("Failed to post", err?.message || 'Error');
