@@ -17,6 +17,7 @@ import NotesHubAnnouncementModal from './NotesHubAnnouncementModal';
 import MyNotesAnnouncementModal from './MyNotesAnnouncementModal';
 import { getFirstName, getLocalDate } from '../lib/utils';
 import { getCampusProgress, getDailyCoins, getDailyXP } from '../lib/campusEconomy';
+import { subscribeSupabaseStudySessions, getCachedUserProfile } from '../lib/supabaseHub';
 import { useTheme } from '../ThemeContext';
 
 export default function Layout() {
@@ -77,30 +78,24 @@ export default function Layout() {
 
   useEffect(() => {
     if (!user) return;
-    const fetchUserData = async () => {
+    let active = true;
+    const fetchUserStats = async () => {
       try {
-        const docSnap = await getDoc(doc(db, "study_sessions", user.uid));
-        if (docSnap.exists()) {
-          setMySession(docSnap.data());
-        } else {
-          setMySession(null);
-        }
-        
-        const statsSnap = await getDoc(doc(db, "users", user.uid));
-        if (statsSnap.exists()) {
-          const data = statsSnap.data();
-          if (data.campus) {
-            setCampusStats({
-              totalXP: data.campus.totalXP || 0,
-              totalCoins: data.campus.totalCoins || 0
-            });
-          }
+        const cached = await getCachedUserProfile(user.uid);
+        if (active && cached?.campus) {
+          setCampusStats({
+            totalXP: cached.campus.totalXP || 0,
+            totalCoins: cached.campus.totalCoins || 0,
+          });
         }
       } catch (e) {
         console.error(e);
       }
     };
-    fetchUserData();
+    fetchUserStats();
+    return () => {
+      active = false;
+    };
   }, [user]);
 
   const getSessionTime = (s: any) => {
@@ -151,45 +146,21 @@ export default function Layout() {
 
   useEffect(() => {
     if (!user) return;
-    
-    const q = query(
-      collection(db, 'study_sessions'), 
-      where('isStudying', '==', true),
-      limit(100)
-    );
-    const fetchActiveCount = async () => {
-      try {
-        const snap = await getDocs(q);
-        let count = 0;
-        snap.forEach(docSnap => {
-          const data = docSnap.data();
-          if (data.isStudying) {
-            let isReallyActive = true;
-            if (data.startTime) {
-              const elapsedSeconds = Math.floor((Date.now() - data.startTime) / 1000);
-              if (elapsedSeconds >= 3 * 3600) {
-                isReallyActive = false;
-              }
-            }
-            if (isReallyActive) {
-              const c = data.communityType || "JEE";
-              if (c === currentCommunity || c === "Both") {
-                count++;
-              }
-            }
-          }
-        });
-        setActiveStudentsCount(count);
-      } catch (error) {
-        console.error("Error fetching active sessions:", error);
+    const todayDate = getLocalDate();
+    const unsub = subscribeSupabaseStudySessions(user.uid, todayDate, (allSessions, mine) => {
+      setMySession(mine);
+      const filtered = allSessions.filter((s) => {
+        const c = s.communityType;
+        if (c !== currentCommunity && c !== 'Both' && c) return false;
+        return true;
+      });
+      if (mine && !filtered.find((s) => s.id === user.uid)) {
+        filtered.push(mine);
       }
-    };
-    
-    fetchActiveCount();
-    
-    // Optionally refresh every 5 minutes instead of live to save reads
-    const timer = setInterval(fetchActiveCount, 5 * 60 * 1000);
-    return () => clearInterval(timer);
+      const studyingCount = filtered.filter((s) => s.isStudying).length;
+      setActiveStudentsCount(studyingCount);
+    });
+    return () => unsub();
   }, [user, currentCommunity]);
 
   useEffect(() => {

@@ -1136,7 +1136,7 @@ export default function LiveStudy() {
             <Users className="w-5 h-5 text-indigo-500" /> Active Students
           </h3>
           <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full text-sm font-bold">
-             {filteredSessions.filter(s => s.isStudying).length} Online
+             {displaySessions.filter(s => s.isStudying).length} Online
           </span>
         </div>
         
