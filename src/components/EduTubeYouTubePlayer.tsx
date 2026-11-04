@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Play,
   Pause,
@@ -10,50 +10,6 @@ import {
   FastForward,
   Rewind,
 } from 'lucide-react';
-
-declare global {
-  interface Window {
-    YT?: any;
-    onYouTubeIframeAPIReady?: () => void;
-  }
-}
-
-let ytApiPromise: Promise<any> | null = null;
-
-function loadYouTubeIframeApi(): Promise<any> {
-  if (typeof window === 'undefined') return Promise.resolve(null);
-  if (window.YT && window.YT.Player) {
-    return Promise.resolve(window.YT);
-  }
-  if (ytApiPromise) return ytApiPromise;
-
-  ytApiPromise = new Promise((resolve) => {
-    const existingScript = document.querySelector(
-      'script[src="https://www.youtube.com/iframe_api"]'
-    );
-    const prevCallback = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      if (prevCallback) prevCallback();
-      resolve(window.YT);
-    };
-
-    if (!existingScript) {
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      tag.async = true;
-      document.head.appendChild(tag);
-    } else {
-      const checkTimer = setInterval(() => {
-        if (window.YT && window.YT.Player) {
-          clearInterval(checkTimer);
-          resolve(window.YT);
-        }
-      }, 150);
-    }
-  });
-
-  return ytApiPromise;
-}
 
 interface EduTubeYouTubePlayerProps {
   youtubeId: string;
@@ -73,8 +29,7 @@ export default function EduTubeYouTubePlayer({
   onToggleMuteExternal,
 }: EduTubeYouTubePlayerProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const mountNodeRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<any>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -91,141 +46,193 @@ export default function EduTubeYouTubePlayer({
       ? thumbnailUrl
       : `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
 
+  // Direct YouTube embed URL with enablejsapi=1 so React owns the <iframe> 100%
+  // (Ensures mobile Chrome on Netlify always renders the hardware video surface)
+  const embedSrc = useMemo(() => {
+    const origin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : '';
+    const params = new URLSearchParams({
+      enablejsapi: '1',
+      autoplay: '1',
+      controls: '0',
+      rel: '0',
+      modestbranding: '1',
+      iv_load_policy: '3',
+      disablekb: '1',
+      fs: '0',
+      playsinline: '1',
+    });
+    if (origin) {
+      params.set('origin', origin);
+      params.set('widget_referrer', origin);
+    }
+    if (isShort) {
+      params.set('loop', '1');
+      params.set('playlist', youtubeId);
+    }
+    return `https://www.youtube.com/embed/${youtubeId}?${params.toString()}`;
+  }, [youtubeId, isShort]);
+
+  const sendPlayerCommand = (func: string, args: any[] = []) => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    try {
+      win.postMessage(
+        JSON.stringify({
+          event: 'command',
+          func,
+          args,
+        }),
+        '*'
+      );
+    } catch {
+      // ignore postMessage errors
+    }
+  };
+
+  const registerIframeListener = () => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    try {
+      win.postMessage(
+        JSON.stringify({
+          event: 'listening',
+          id: 1,
+          channel: 'widget',
+        }),
+        '*'
+      );
+      sendPlayerCommand('addEventListener', ['onReady']);
+      sendPlayerCommand('addEventListener', ['onStateChange']);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
-    let destroyed = false;
     setIsReady(false);
     setIsPlaying(false);
     setIsEnded(false);
     setCurrentTime(0);
     setDuration(0);
 
-    loadYouTubeIframeApi().then((YT) => {
-      if (destroyed || !YT || !mountNodeRef.current) return;
-
-      // Clear mount node and create a fresh child div for YT.Player
-      mountNodeRef.current.innerHTML = '';
-      const playerDiv = document.createElement('div');
-      mountNodeRef.current.appendChild(playerDiv);
-
-      try {
-        playerRef.current = new YT.Player(playerDiv, {
-          videoId: youtubeId,
-          width: '100%',
-          height: '100%',
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            rel: 0,
-            modestbranding: 1,
-            iv_load_policy: 3,
-            disablekb: 1,
-            fs: 0,
-            playsinline: 1,
-            origin: window.location.origin,
-          },
-          events: {
-            onReady: (event: any) => {
-              if (destroyed) return;
-              setIsReady(true);
-              const totalDur = Number(event.target?.getDuration?.() || 0);
-              if (totalDur > 0) setDuration(totalDur);
-              if (isMutedExternal) {
-                event.target?.mute?.();
-                setIsMuted(true);
-              } else {
-                event.target?.unMute?.();
-                setIsMuted(false);
-              }
-              event.target?.playVideo?.();
-            },
-            onStateChange: (event: any) => {
-              if (destroyed || !window.YT) return;
-              const state = event.data;
-              const totalDur = Number(event.target?.getDuration?.() || 0);
-              if (totalDur > 0) setDuration(totalDur);
-
-              if (state === window.YT.PlayerState.PLAYING) {
-                setIsPlaying(true);
-                setIsEnded(false);
-              } else if (state === window.YT.PlayerState.PAUSED) {
-                setIsPlaying(false);
-              } else if (state === window.YT.PlayerState.ENDED) {
-                if (isShort) {
-                  event.target?.seekTo?.(0, true);
-                  event.target?.playVideo?.();
-                } else {
-                  setIsPlaying(false);
-                  setIsEnded(true);
-                }
-              }
-            },
-          },
-        });
-      } catch (e) {
-        console.warn('YT.Player init error:', e);
+    const handleMessage = (event: MessageEvent) => {
+      if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) {
+        return;
       }
-    });
+      if (typeof event.data !== 'string') return;
 
-    return () => {
-      destroyed = true;
-      if (playerRef.current && typeof playerRef.current.destroy === 'function') {
-        try {
-          playerRef.current.destroy();
-        } catch {
-          // ignore
+      let data: any;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      if (!data) return;
+
+      if (data.event === 'onReady' || data.event === 'initialDelivery') {
+        setIsReady(true);
+        if (isMutedExternal) {
+          sendPlayerCommand('mute');
+          setIsMuted(true);
         }
+        sendPlayerCommand('playVideo');
       }
-      playerRef.current = null;
-    };
-  }, [youtubeId, isShort]);
 
-  // Sync external mute prop (for Shorts header mute toggle)
-  useEffect(() => {
-    if (typeof isMutedExternal !== 'boolean' || !playerRef.current || !isReady) return;
-    try {
-      if (isMutedExternal) {
-        playerRef.current.mute?.();
-        setIsMuted(true);
-      } else {
-        playerRef.current.unMute?.();
-        setIsMuted(false);
-      }
-    } catch {
-      // ignore
-    }
-  }, [isMutedExternal, isReady]);
+      if (data.event === 'infoDelivery' && data.info) {
+        setIsReady(true);
+        const info = data.info;
 
-  // Poll progress every 250ms and intercept last 0.6s so YouTube's end-screen related videos NEVER appear
-  useEffect(() => {
-    if (!isReady) return;
-    const interval = setInterval(() => {
-      const p = playerRef.current;
-      if (!p || typeof p.getCurrentTime !== 'function') return;
-      try {
-        const cur = Number(p.getCurrentTime() || 0);
-        const dur = Number(p.getDuration() || 0);
-        setCurrentTime(cur);
-        if (dur > 0) {
-          setDuration(dur);
-          if (cur >= dur - 0.65 && dur > 2) {
+        if (typeof info.duration === 'number' && info.duration > 0) {
+          setDuration(info.duration);
+        }
+        if (typeof info.currentTime === 'number') {
+          setCurrentTime(info.currentTime);
+        }
+        if (typeof info.muted === 'boolean') {
+          setIsMuted(info.muted);
+        }
+
+        if (typeof info.playerState === 'number') {
+          // YT.PlayerState: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
+          if (info.playerState === 1 || info.playerState === 3) {
+            setIsPlaying(true);
+            setIsEnded(false);
+          } else if (info.playerState === 2) {
+            setIsPlaying(false);
+          } else if (info.playerState === 0) {
             if (isShort) {
-              p.seekTo(0, true);
-              p.playVideo();
+              sendPlayerCommand('seekTo', [0, true]);
+              sendPlayerCommand('playVideo');
             } else {
-              p.pauseVideo();
-              p.seekTo(0, true);
               setIsPlaying(false);
               setIsEnded(true);
             }
           }
         }
-      } catch {
-        // ignore
       }
-    }, 250);
 
-    return () => clearInterval(interval);
-  }, [isReady, isShort]);
+      if (data.event === 'onStateChange' && typeof data.info === 'number') {
+        const state = data.info;
+        if (state === 1 || state === 3) {
+          setIsPlaying(true);
+          setIsEnded(false);
+        } else if (state === 2) {
+          setIsPlaying(false);
+        } else if (state === 0) {
+          if (isShort) {
+            sendPlayerCommand('seekTo', [0, true]);
+            sendPlayerCommand('playVideo');
+          } else {
+            setIsPlaying(false);
+            setIsEnded(true);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Periodically send listening handshake until ready
+    const handshakeInterval = setInterval(() => {
+      registerIframeListener();
+    }, 600);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      clearInterval(handshakeInterval);
+    };
+  }, [youtubeId, isShort]);
+
+  // Intercept the final 0.7s of the video so YouTube's end-screen related videos never show
+  useEffect(() => {
+    if (duration > 2 && currentTime >= duration - 0.75) {
+      if (isShort) {
+        sendPlayerCommand('seekTo', [0, true]);
+        sendPlayerCommand('playVideo');
+      } else if (!isEnded) {
+        sendPlayerCommand('pauseVideo');
+        sendPlayerCommand('seekTo', [0, true]);
+        setIsPlaying(false);
+        setIsEnded(true);
+      }
+    }
+  }, [currentTime, duration, isShort, isEnded]);
+
+  // Sync external mute prop (for Shorts header mute toggle)
+  useEffect(() => {
+    if (typeof isMutedExternal !== 'boolean') return;
+    if (isMutedExternal) {
+      sendPlayerCommand('mute');
+      setIsMuted(true);
+    } else {
+      sendPlayerCommand('unMute');
+      setIsMuted(false);
+    }
+  }, [isMutedExternal]);
 
   const triggerShowControls = () => {
     setShowControls(true);
@@ -237,36 +244,30 @@ export default function EduTubeYouTubePlayer({
 
   const handleTogglePlay = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const p = playerRef.current;
-    if (!p) return;
-    try {
-      if (isEnded) {
-        p.seekTo(0, true);
-        p.playVideo();
-        setIsEnded(false);
-        setIsPlaying(true);
-      } else if (isPlaying) {
-        p.pauseVideo();
-        setIsPlaying(false);
-      } else {
-        p.playVideo();
-        setIsPlaying(true);
-      }
-      triggerShowControls();
-    } catch {
-      // ignore
+    registerIframeListener();
+    if (isEnded) {
+      sendPlayerCommand('seekTo', [0, true]);
+      sendPlayerCommand('playVideo');
+      setIsEnded(false);
+      setIsPlaying(true);
+    } else if (isPlaying) {
+      sendPlayerCommand('pauseVideo');
+      setIsPlaying(false);
+    } else {
+      sendPlayerCommand('playVideo');
+      setIsPlaying(true);
     }
+    triggerShowControls();
   };
 
   const handleSkip = (deltaSeconds: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    const p = playerRef.current;
-    if (!p || !duration) return;
-    const next = Math.max(0, Math.min(duration - 1, currentTime + deltaSeconds));
-    p.seekTo(next, true);
+    const maxDur = duration > 0 ? duration - 1 : currentTime + 60;
+    const next = Math.max(0, Math.min(maxDur, currentTime + deltaSeconds));
+    sendPlayerCommand('seekTo', [next, true]);
     setCurrentTime(next);
     if (!isPlaying) {
-      p.playVideo();
+      sendPlayerCommand('playVideo');
       setIsPlaying(true);
       setIsEnded(false);
     }
@@ -276,14 +277,11 @@ export default function EduTubeYouTubePlayer({
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const next = Number(e.target.value);
     setCurrentTime(next);
-    const p = playerRef.current;
-    if (p && typeof p.seekTo === 'function') {
-      p.seekTo(next, true);
-      if (isEnded) {
-        p.playVideo();
-        setIsEnded(false);
-        setIsPlaying(true);
-      }
+    sendPlayerCommand('seekTo', [next, true]);
+    if (isEnded || !isPlaying) {
+      sendPlayerCommand('playVideo');
+      setIsEnded(false);
+      setIsPlaying(true);
     }
     triggerShowControls();
   };
@@ -294,18 +292,12 @@ export default function EduTubeYouTubePlayer({
       onToggleMuteExternal();
       return;
     }
-    const p = playerRef.current;
-    if (!p) return;
-    try {
-      if (isMuted) {
-        p.unMute();
-        setIsMuted(false);
-      } else {
-        p.mute();
-        setIsMuted(true);
-      }
-    } catch {
-      // ignore
+    if (isMuted) {
+      sendPlayerCommand('unMute');
+      setIsMuted(false);
+    } else {
+      sendPlayerCommand('mute');
+      setIsMuted(true);
     }
   };
 
@@ -314,11 +306,7 @@ export default function EduTubeYouTubePlayer({
     const rates = [1, 1.25, 1.5, 2];
     const next = rates[(rates.indexOf(playbackRate) + 1) % rates.length];
     setPlaybackRate(next);
-    try {
-      playerRef.current?.setPlaybackRate?.(next);
-    } catch {
-      // ignore
-    }
+    sendPlayerCommand('setPlaybackRate', [next]);
   };
 
   const handleFullscreen = (e: React.MouseEvent) => {
@@ -343,37 +331,79 @@ export default function EduTubeYouTubePlayer({
   return (
     <div
       ref={wrapperRef}
-      onClick={() => handleTogglePlay()}
       onMouseMove={triggerShowControls}
       onTouchStart={triggerShowControls}
-      className="relative w-full h-full bg-black overflow-hidden select-none cursor-pointer group"
+      className="absolute inset-0 w-full h-full bg-black overflow-hidden select-none cursor-pointer group"
     >
-      {/* YouTube IFrame with Vertical Overscan & pointer-events-none so YouTube UI/Logo/Links are 100% hidden & unclickable */}
-      <div
-        ref={mountNodeRef}
-        className="absolute inset-x-0 -top-[22%] h-[144%] w-full pointer-events-none"
+      {/* Direct React <iframe> at 100% full container size so Android/iOS Chrome always renders the video track */}
+      <iframe
+        ref={iframeRef}
+        src={embedSrc}
+        title={title}
+        onLoad={registerIframeListener}
+        style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
+        className="absolute inset-0 w-full h-full border-0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
       />
 
-      {/* EduTube Branded Pause / End / Loading Shield - Completely hides YouTube's "More Videos" popup when paused or ended! */}
-      {(!isPlaying || isEnded || !isReady) && (
+      {/* Transparent Click-Catcher over the video so tapping pauses/plays inside EduTube and never redirects to YouTube */}
+      <div
+        onClick={(e) => handleTogglePlay(e)}
+        className="absolute inset-0 z-10 bg-transparent"
+      />
+
+      {/* Top EduTube Header Shield (blocks YouTube top channel/title bar & shows EduTube branding) */}
+      {!isShort && (
         <div
           onClick={(e) => handleTogglePlay(e)}
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md transition-opacity duration-200"
+          className={`absolute top-0 inset-x-0 z-20 px-3.5 py-2.5 bg-gradient-to-b from-black/85 via-black/45 to-transparent flex items-center justify-between transition-opacity duration-200 ${
+            showControls || !isPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-600 text-white text-[11px] font-extrabold tracking-tight shadow-sm shrink-0">
+              <Play className="w-2.5 h-2.5 fill-current" />
+              <span>EduTube</span>
+            </div>
+            <span className="text-xs font-semibold text-white/90 truncate">
+              {title}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Permanent Bottom-Right EduTube Watermark Shield (Covers YouTube's bottom-right watermark even when controls hide) */}
+      {!isShort && isPlaying && !showControls && (
+        <div
+          onClick={(e) => handleTogglePlay(e)}
+          className="absolute bottom-2.5 right-3 z-20 flex items-center gap-1 px-2.5 py-1 rounded-md bg-black/75 border border-white/15 text-white text-[10px] font-extrabold tracking-tight shadow-md"
+        >
+          <Play className="w-2.5 h-2.5 text-red-500 fill-red-500" />
+          <span>EduTube</span>
+        </div>
+      )}
+
+      {/* EduTube Branded Pause / End Shield - Completely hides YouTube's "More Videos / Related Videos" popup when paused or ended! */}
+      {(!isPlaying || isEnded) && (
+        <div
+          onClick={(e) => handleTogglePlay(e)}
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-md transition-opacity duration-150"
         >
           <img
             src={posterImage}
             alt={title}
-            className="absolute inset-0 w-full h-full object-cover opacity-35"
+            className="absolute inset-0 w-full h-full object-cover opacity-40"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/70" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/75" />
 
           {/* Top EduTube Original Player Badge */}
-          <div className="absolute top-3.5 left-4 flex items-center gap-2 z-10">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-600 text-white text-xs font-extrabold tracking-tight shadow-lg shadow-red-600/30">
+          <div className="absolute top-3.5 left-4 right-4 flex items-center gap-2 z-10">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-600 text-white text-xs font-extrabold tracking-tight shadow-lg shadow-red-600/30 shrink-0">
               <Play className="w-3.5 h-3.5 fill-current" />
               <span>EduTube</span>
             </div>
-            <span className="text-xs font-semibold text-white/80 line-clamp-1 max-w-[240px] sm:max-w-md">
+            <span className="text-xs font-semibold text-white/85 truncate">
               {title}
             </span>
           </div>
@@ -391,12 +421,14 @@ export default function EduTubeYouTubePlayer({
                 <Play className="w-8 h-8 text-white fill-current ml-1" />
               )}
             </button>
-            <span className="px-3 py-1 rounded-full bg-black/65 border border-white/15 text-white text-xs font-bold tracking-wide">
-              {!isReady
-                ? 'Loading EduTube Stream...'
-                : isEnded
+            <span className="px-3 py-1 rounded-full bg-black/70 border border-white/15 text-white text-xs font-bold tracking-wide">
+              {isEnded
                 ? 'Replay Video on EduTube'
-                : 'Paused · Tap to Resume'}
+                : currentTime > 0
+                ? 'Paused · Tap to Resume'
+                : !isReady
+                ? 'Tap to Play on EduTube'
+                : 'Tap to Play'}
             </span>
           </div>
         </div>
@@ -406,7 +438,7 @@ export default function EduTubeYouTubePlayer({
       {!isShort && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className={`absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/95 via-black/75 to-transparent pt-8 pb-3 px-3 sm:px-4 transition-opacity duration-200 ${
+          className={`absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/95 via-black/80 to-transparent pt-8 pb-3 px-3 sm:px-4 transition-opacity duration-200 ${
             showControls || !isPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
         >
@@ -471,7 +503,11 @@ export default function EduTubeYouTubePlayer({
                 className="p-1.5 rounded-lg hover:bg-white/15 text-white/90 hover:text-white transition-colors"
                 title={isMuted ? 'Unmute' : 'Mute'}
               >
-                {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4" />}
+                {isMuted ? (
+                  <VolumeX className="w-4 h-4 text-red-400" />
+                ) : (
+                  <Volume2 className="w-4 h-4" />
+                )}
               </button>
             </div>
 
@@ -487,7 +523,7 @@ export default function EduTubeYouTubePlayer({
               </button>
 
               {/* EduTube Official Brand Badge in place of YouTube Icon */}
-              <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-600/90 text-white text-[10px] font-extrabold tracking-tight shadow-sm">
+              <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-600/95 text-white text-[10px] font-extrabold tracking-tight shadow-sm">
                 <Play className="w-2.5 h-2.5 fill-current" />
                 <span>EduTube</span>
               </div>
