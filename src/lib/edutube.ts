@@ -60,8 +60,8 @@ export const JEE_COMMUNITY_OFFICIAL_BANNER_URL =
 export const JEE_COMMUNITY_OFFICIAL_BIO =
   'Official Video & Creator Hub of JEE Community 🇮🇳 | Watch Concept Breakdowns, Problem Solutions, Study Strategies, Campus Vlogs & Quick Shorts. Subscribe & share your own videos with the community!';
 
-const LOCAL_VIDEOS_KEY = 'edutube_videos_cache_v4';
-const LOCAL_CHANNELS_KEY = 'edutube_channels_cache_v5';
+const LOCAL_VIDEOS_KEY = 'edutube_videos_cache_v6';
+const LOCAL_CHANNELS_KEY = 'edutube_channels_cache_v8';
 const LOCAL_DELETED_IDS_KEY = 'edutube_deleted_ids_v1';
 const LOCAL_CONFIG_KEY = 'edutube_cloud_config_v1';
 const SAVED_VIDEOS_KEY = 'edutube_saved_ids_v1';
@@ -116,40 +116,16 @@ function createSvgThumbnail(
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-export function createChannelBannerSvg(channelName: string, handle: string): string {
-  const safeName = (channelName || 'Creator Channel')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  const safeHandle = (handle ? `@${handle.replace(/^@/, '')}` : '@creator')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="400" viewBox="0 0 1600 400">
+export function createChannelBannerSvg(_channelName?: string, _handle?: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="320" viewBox="0 0 1600 320">
     <defs>
       <linearGradient id="cbg" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#090D16" />
-        <stop offset="50%" stop-color="#111827" />
-        <stop offset="100%" stop-color="#1E1B4B" />
+        <stop offset="0%" stop-color="#0F172A" />
+        <stop offset="50%" stop-color="#1E293B" />
+        <stop offset="100%" stop-color="#0F172A" />
       </linearGradient>
-      <radialGradient id="cglow" cx="85%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#EF4444" stop-opacity="0.28" />
-        <stop offset="100%" stop-color="#EF4444" stop-opacity="0" />
-      </radialGradient>
     </defs>
-    <rect width="1600" height="400" fill="url(#cbg)" />
-    <rect width="1600" height="400" fill="url(#cglow)" />
-    <g stroke="#ffffff" stroke-opacity="0.04" stroke-width="2">
-      <line x1="0" y1="100" x2="1600" y2="100" />
-      <line x1="0" y1="200" x2="1600" y2="200" />
-      <line x1="0" y1="300" x2="1600" y2="300" />
-      <line x1="400" y1="0" x2="400" y2="400" />
-      <line x1="800" y1="0" x2="800" y2="400" />
-      <line x1="1200" y1="0" x2="1200" y2="400" />
-    </g>
-    <text x="100" y="195" font-family="Plus Jakarta Sans, sans-serif" font-size="54" font-weight="800" fill="#F8FAFC">${safeName}</text>
-    <text x="100" y="255" font-family="IBM Plex Mono, monospace" font-size="26" font-weight="600" fill="#94A3B8">${safeHandle} · OFFICIAL EDUTUBE CHANNEL</text>
+    <rect width="1600" height="320" fill="url(#cbg)" />
   </svg>`;
 
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -476,14 +452,30 @@ function normalizeVideoRow(r: any): EduTubeVideo {
 
 function normalizeChannelFromRow(r: any): EduTubeChannel {
   const uid = String(r.author_uid || r.uid || String(r.id || '').replace(/^channel_/, ''));
-  const rawName = r.title || r.name || r.author_name || 'Creator Channel';
-  const handle = (r.author_username || r.handle || rawName.toLowerCase().replace(/[^a-z0-9]/g, '_')).replace(/^@/, '');
   const isOfficialJeeChannel = uid === '8MFhW6Ljr0bibCPjos5734DTkHR2';
 
+  let rawName = String(r.title || r.name || r.author_name || 'Creator Channel').trim();
+  if (!isOfficialJeeChannel && rawName.toLowerCase() === 'jee community') {
+    rawName = uid === 'sYoZnmiq0AavIUoocIwSuJcbuRD2' ? 'hrizzz🐬' : 'Creator Channel';
+  }
   const name = isOfficialJeeChannel ? 'JEE Community' : rawName;
 
+  let handle = String(
+    r.author_username || r.handle || name.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'creator'
+  )
+    .replace(/^@/, '')
+    .trim();
+  if (!isOfficialJeeChannel && handle.toLowerCase() === 'jeecommunity') {
+    handle = uid === 'sYoZnmiq0AavIUoocIwSuJcbuRD2' ? 'hrizzz' : 'creator';
+  }
+
   let avatarUrl = r.author_photo || r.avatar_url || '';
-  if (
+  if (!isOfficialJeeChannel && avatarUrl.includes('jc_official_logo')) {
+    avatarUrl =
+      uid === 'sYoZnmiq0AavIUoocIwSuJcbuRD2'
+        ? 'https://res.cloudinary.com/gg0rxzjm/image/upload/v1787313194/lteyrxreowouwkng1w6y.png'
+        : '';
+  } else if (
     isOfficialJeeChannel &&
     (!avatarUrl || avatarUrl.includes('res.cloudinary.com/gg0rxzjm'))
   ) {
@@ -494,6 +486,14 @@ function normalizeChannelFromRow(r: any): EduTubeChannel {
     r.thumbnail_url && !r.thumbnail_url.startsWith('channel://')
       ? r.thumbnail_url
       : r.banner_url || '';
+
+  if (
+    !isOfficialJeeChannel &&
+    (bannerUrl.includes('jc_official_banner') ||
+      bannerUrl.includes('channel_banner_sYoZnmiq0AavIUoocIwSuJcbuRD2'))
+  ) {
+    bannerUrl = '';
+  }
 
   if (
     isOfficialJeeChannel &&
@@ -513,7 +513,7 @@ function normalizeChannelFromRow(r: any): EduTubeChannel {
       r.bio ||
       (isOfficialJeeChannel
         ? JEE_COMMUNITY_OFFICIAL_BIO
-        : 'Welcome to my official EduTube channel! Subscribe for regular videos.'),
+        : 'Welcome to my EduTube channel! Subscribe for regular study videos.'),
     avatar_url: avatarUrl,
     banner_url: bannerUrl,
     subscribers: Array.isArray(r.liked_by)
@@ -592,7 +592,7 @@ function mergeAndSynthesizeChannels(
         uid: v.author_uid,
         name: v.author_name || 'Creator',
         handle,
-        bio: `Official EduTube channel of ${v.author_name}. Watch & subscribe for regular videos!`,
+        bio: `EduTube channel of ${v.author_name}. Watch & subscribe for regular study videos!`,
         avatar_url: v.author_photo || '',
         banner_url: createChannelBannerSvg(v.author_name || 'Creator', handle),
         subscribers: [],
@@ -703,17 +703,30 @@ export async function saveEduTubeChannel(channelInput: {
 }): Promise<EduTubeChannel> {
   const existingChannels = getLocalChannels();
   const existing = existingChannels.find((c) => c.uid === channelInput.uid);
-
-  const cleanHandle = (
-    channelInput.handle.trim() ||
-    channelInput.name.toLowerCase().replace(/[^a-z0-9]/g, '_') ||
-    'creator'
-  ).replace(/^@/, '');
-
-  const cleanName = channelInput.name.trim() || 'My Channel';
   const isOfficialJeeChannel = channelInput.uid === '8MFhW6Ljr0bibCPjos5734DTkHR2';
 
+  let cleanName = channelInput.name.trim() || 'My Channel';
+  if (!isOfficialJeeChannel && cleanName.toLowerCase() === 'jee community') {
+    cleanName = channelInput.uid === 'sYoZnmiq0AavIUoocIwSuJcbuRD2' ? 'hrizzz🐬' : 'My Channel';
+  }
+
+  let cleanHandle = (
+    channelInput.handle.trim() ||
+    cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_') ||
+    'creator'
+  ).replace(/^@/, '');
+  if (!isOfficialJeeChannel && cleanHandle.toLowerCase() === 'jeecommunity') {
+    cleanHandle = channelInput.uid === 'sYoZnmiq0AavIUoocIwSuJcbuRD2' ? 'hrizzz' : 'creator';
+  }
+
   let resolvedBanner = channelInput.banner_url || existing?.banner_url || '';
+  if (
+    !isOfficialJeeChannel &&
+    (resolvedBanner.includes('jc_official_banner') ||
+      resolvedBanner.includes('channel_banner_sYoZnmiq0AavIUoocIwSuJcbuRD2'))
+  ) {
+    resolvedBanner = '';
+  }
   if (!resolvedBanner || resolvedBanner.startsWith('data:image/svg+xml')) {
     resolvedBanner = isOfficialJeeChannel
       ? JEE_COMMUNITY_OFFICIAL_BANNER_URL
@@ -721,7 +734,12 @@ export async function saveEduTubeChannel(channelInput: {
   }
 
   let resolvedAvatar = channelInput.avatar_url ?? existing?.avatar_url ?? '';
-  if (
+  if (!isOfficialJeeChannel && resolvedAvatar.includes('jc_official_logo')) {
+    resolvedAvatar =
+      channelInput.uid === 'sYoZnmiq0AavIUoocIwSuJcbuRD2'
+        ? 'https://res.cloudinary.com/gg0rxzjm/image/upload/v1787313194/lteyrxreowouwkng1w6y.png'
+        : '';
+  } else if (
     isOfficialJeeChannel &&
     (!resolvedAvatar || resolvedAvatar.includes('res.cloudinary.com/gg0rxzjm'))
   ) {
@@ -736,7 +754,7 @@ export async function saveEduTubeChannel(channelInput: {
       channelInput.bio.trim() ||
       (isOfficialJeeChannel
         ? JEE_COMMUNITY_OFFICIAL_BIO
-        : 'Welcome to my official EduTube channel! Subscribe for new videos.'),
+        : 'Welcome to my EduTube channel! Subscribe for new videos.'),
     avatar_url: resolvedAvatar,
     banner_url: resolvedBanner,
     subscribers: existing?.subscribers || [],

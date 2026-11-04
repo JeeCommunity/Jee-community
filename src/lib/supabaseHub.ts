@@ -23,6 +23,7 @@ export type HubRecordType =
 const HUB_EVENT_NAME = 'jee-supabase-hub-sync';
 const READ_NOTIFS_STORAGE_KEY = 'jee_hub_read_notif_ids_v1';
 const CLEARED_NOTIFS_TS_KEY = 'jee_hub_cleared_notifs_before_v1';
+const CLEARED_NOTIF_IDS_KEY = 'jee_hub_cleared_notif_ids_v1';
 const SEEN_LIVE_TOAST_IDS_KEY = 'jee_hub_seen_live_toasts_v1';
 
 // In-memory caches to eliminate duplicate network/Firebase requests
@@ -301,9 +302,23 @@ export function markNotificationReadLocal(notifId: string): void {
   emitHubSync('hub_notification', notifId);
 }
 
-export function clearAllNotificationsForUser(): void {
+export function getClearedNotificationIds(): string[] {
   try {
-    localStorage.setItem(CLEARED_NOTIFS_TS_KEY, String(Date.now()));
+    const raw = localStorage.getItem(CLEARED_NOTIF_IDS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function clearAllNotificationsForUser(idsToClear: string[] = []): void {
+  try {
+    localStorage.setItem(CLEARED_NOTIFS_TS_KEY, String(Date.now() + 60000));
+    if (idsToClear.length > 0) {
+      const existing = getClearedNotificationIds();
+      const merged = Array.from(new Set([...idsToClear, ...existing])).slice(0, 400);
+      localStorage.setItem(CLEARED_NOTIF_IDS_KEY, JSON.stringify(merged));
+    }
   } catch {
     // ignore
   }
@@ -448,6 +463,7 @@ export async function fetchUserSupabaseNotifications(uid: string): Promise<any[]
     `select=*&video_type=eq.hub_notification&chapter=in.(ALL,${encodeURIComponent(uid)})&order=created_at.desc&limit=40`
   );
   const readIds = getReadNotificationIds();
+  const clearedIds = getClearedNotificationIds();
   const clearedBefore = Number(localStorage.getItem(CLEARED_NOTIFS_TS_KEY) || '0');
 
   const results: any[] = [];
@@ -456,6 +472,9 @@ export async function fetchUserSupabaseNotifications(uid: string): Promise<any[]
     if (!p) continue;
     // Don't show a global notification to the user who uploaded it themselves
     if (p.recipientId === 'ALL' && p.senderId === uid) continue;
+    const notifId = p.id || row.id;
+    if (clearedIds.includes(notifId) || clearedIds.includes(row.id)) continue;
+
     const createdAtMs = p.createdAtMs || new Date(row.created_at).getTime();
     if (clearedBefore > 0 && createdAtMs <= clearedBefore) continue;
 

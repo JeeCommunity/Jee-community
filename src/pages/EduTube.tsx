@@ -42,6 +42,7 @@ import { useAuth } from '../AuthContext';
 import { createNotification } from '../lib/notifications';
 import EduTubeYouTubePlayer from '../components/EduTubeYouTubePlayer';
 import EduTubeLiveRoomPlayer from '../components/EduTubeLiveRoomPlayer';
+import EduTubeVastAdPlayer from '../components/EduTubeVastAdPlayer';
 import {
   EduTubeVideo,
   EduTubeChannel,
@@ -115,6 +116,9 @@ export default function EduTube() {
 
   // Watch Video state
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
+  const [isPlayingVastAd, setIsPlayingVastAd] = useState<boolean>(false);
+  const [showMp4MidRollAd, setShowMp4MidRollAd] = useState<boolean>(false);
+  const mp4MidRollTriggeredRef = useRef<boolean>(false);
   const [resolvedPlayableUrl, setResolvedPlayableUrl] = useState<string>('');
   const [isBufferingChunks, setIsBufferingChunks] = useState<boolean>(false);
   const [chunkBufferProgress, setChunkBufferProgress] = useState<number>(0);
@@ -556,6 +560,9 @@ export default function EduTube() {
     setViewingChannelUid(null);
     setIsShortCommentsOpen(false);
     setIsShortPaused(false);
+    setShowMp4MidRollAd(false);
+    mp4MidRollTriggeredRef.current = false;
+    setIsPlayingVastAd(video.video_type !== 'live');
     setActiveVideoId(video.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
@@ -1246,8 +1253,14 @@ export default function EduTube() {
                   }}
                   className="relative w-full max-w-[390px] sm:max-w-[410px] h-[77vh] min-h-[520px] max-h-[780px] aspect-[9/16] rounded-3xl overflow-hidden bg-black shadow-2xl border border-slate-800 select-none"
                 >
-                  {/* Video Surface */}
-                  {embed.type === 'youtube' && embed.youtubeId ? (
+                  {/* Video Surface (Plays VAST 3.0 Pre-Roll Ad first, then Short) */}
+                  {isPlayingVastAd ? (
+                    <EduTubeVastAdPlayer
+                      key={`vast_short_${activeVideo.id}`}
+                      isShort={true}
+                      onAdFinished={() => setIsPlayingVastAd(false)}
+                    />
+                  ) : embed.type === 'youtube' && embed.youtubeId ? (
                     <EduTubeYouTubePlayer
                       youtubeId={embed.youtubeId}
                       title={activeVideo.title}
@@ -1649,6 +1662,17 @@ export default function EduTube() {
             >
               {(() => {
                 const embed = getEmbedInfo(activeVideo.video_url);
+                if (isPlayingVastAd && activeVideo.video_type !== 'live') {
+                  return (
+                    <div className="relative w-full aspect-video bg-black">
+                      <EduTubeVastAdPlayer
+                        key={`vast_long_${activeVideo.id}`}
+                        isShort={false}
+                        onAdFinished={() => setIsPlayingVastAd(false)}
+                      />
+                    </div>
+                  );
+                }
                 if (embed.type === 'live_room') {
                   return (
                     <EduTubeLiveRoomPlayer
@@ -1706,15 +1730,43 @@ export default function EduTube() {
                         </p>
                       </div>
                     ) : (
-                      <video
-                        ref={videoRef}
-                        src={resolvedPlayableUrl || embed.embedUrl}
-                        poster={activeVideo.thumbnail_url}
-                        controls
-                        autoPlay
-                        playsInline
-                        className="w-full h-full max-h-[75vh] object-contain"
-                      />
+                      <>
+                        <video
+                          ref={videoRef}
+                          src={resolvedPlayableUrl || embed.embedUrl}
+                          poster={activeVideo.thumbnail_url}
+                          controls
+                          autoPlay
+                          playsInline
+                          onTimeUpdate={(e) => {
+                            const el = e.currentTarget;
+                            const dur = el.duration;
+                            const cur = el.currentTime;
+                            if (
+                              !mp4MidRollTriggeredRef.current &&
+                              Number.isFinite(dur) &&
+                              dur >= 120 &&
+                              cur >= Math.min(180, dur * 0.5) &&
+                              cur < Math.min(180, dur * 0.5) + 4
+                            ) {
+                              mp4MidRollTriggeredRef.current = true;
+                              el.pause();
+                              setShowMp4MidRollAd(true);
+                            }
+                          }}
+                          className="w-full h-full max-h-[75vh] object-contain"
+                        />
+                        {showMp4MidRollAd && (
+                          <EduTubeVastAdPlayer
+                            key={`vast_mid_${activeVideo.id}`}
+                            isShort={false}
+                            onAdFinished={() => {
+                              setShowMp4MidRollAd(false);
+                              videoRef.current?.play().catch(() => {});
+                            }}
+                          />
+                        )}
+                      </>
                     )}
                   </div>
                 );
@@ -2224,18 +2276,18 @@ export default function EduTube() {
       ) : viewingChannel ? (
         /* 2. DEDICATED YOUTUBE CHANNEL PAGE VIEW */
         <div className="mt-6">
-          {/* Channel Banner */}
-          <div className="w-full h-36 sm:h-48 md:h-56 rounded-2xl overflow-hidden bg-slate-900 border border-slate-200 dark:border-slate-800 relative">
-            <img
-              src={
-                viewingChannel.banner_url ||
-                createChannelBannerSvg(viewingChannel.name, viewingChannel.handle)
-              }
-              alt={viewingChannel.name}
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover"
-            />
-          </div>
+          {/* Channel Banner (only shown if custom image banner is set) */}
+          {viewingChannel.banner_url &&
+            !viewingChannel.banner_url.startsWith('data:image/svg+xml') && (
+              <div className="w-full h-32 sm:h-40 rounded-2xl overflow-hidden bg-slate-900 border border-slate-200 dark:border-slate-800 relative mb-4">
+                <img
+                  src={viewingChannel.banner_url}
+                  alt={viewingChannel.name}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            )}
 
           {/* Channel Profile Header */}
           {(() => {
@@ -2618,6 +2670,41 @@ export default function EduTube() {
             </div>
           )}
 
+          {/* Official EduTube Creator Guidelines, Study Vlog & Earning Opportunity Notice */}
+          <div className="mb-5 p-3.5 sm:p-4 rounded-xl bg-gradient-to-r from-red-500/10 via-amber-500/10 to-emerald-500/10 border border-red-500/25 dark:border-red-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2 py-0.5 rounded-md bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-wider">
+                  Creator Notice
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-emerald-600/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                  💰 Creator Earning Opportunity
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm font-medium text-slate-800 dark:text-slate-200 leading-relaxed">
+                Yahan aap sab apna <strong>Daily Personal Study Vlog</strong>, <strong>Exam Strategy</strong>, <strong>Question Solutions</strong> aur <strong>Short Tricks</strong> bana kar daal sakte ho — aur isse aap sab ki <strong>Earning</strong> bhi ho sakti hai!{' '}
+                <span className="text-red-600 dark:text-red-400 font-semibold">
+                  ⚠️ Dhyan rahe: Sirf study related videos hi upload karein, faltu chiz daalne par video turant delete kar diya jayega.
+                </span>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (!thumbnailPreview) {
+                  setThumbnailPreview(
+                    createCustomBannerThumbnail('My Study Vlog', '#study #vlog #solution')
+                  );
+                }
+                setIsUploadOpen(true);
+              }}
+              className="px-3.5 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-sm"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Upload Study Video</span>
+            </button>
+          </div>
+
           {/* Subscribed Channels Quick Strip when inside Subscriptions tab */}
           {activeTab === 'subscriptions' && subscribedChannels.length > 0 && (
             <div className="mb-5 p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center gap-4 overflow-x-auto">
@@ -2687,14 +2774,6 @@ export default function EduTube() {
                       onClick={() => handleOpenChannelPage(ch.uid)}
                       className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-slate-300 dark:hover:border-slate-700 transition-all cursor-pointer flex flex-col"
                     >
-                      <div className="h-24 bg-slate-900 overflow-hidden">
-                        <img
-                          src={ch.banner_url || createChannelBannerSvg(ch.name, ch.handle)}
-                          alt={ch.name}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
                       <div className="p-4 flex-1 flex flex-col justify-between">
                         <div>
                           <div className="flex items-center justify-between gap-3">
@@ -3129,50 +3208,39 @@ export default function EduTube() {
             </div>
 
             <form onSubmit={handleSaveChannelProfile} className="mt-4 space-y-4">
-              {isAdmin && (
-                <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                  <div>
-                    <div className="text-xs font-bold text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-blue-500" />
-                      <span>Official JEE Community Channel Kit</span>
-                    </div>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                      Apply official JEE Community HD Logo, Wide Banner, @jeecommunity handle &amp; bio
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setChannelNameInput('JEE Community');
-                      setChannelHandleInput('jeecommunity');
-                      setChannelBioInput(JEE_COMMUNITY_OFFICIAL_BIO);
-                      setChannelAvatarPreview(JEE_COMMUNITY_OFFICIAL_LOGO_URL);
-                      setChannelBannerPreview(JEE_COMMUNITY_OFFICIAL_BANNER_URL);
-                      setChannelAvatarBlob(null);
-                      setChannelBannerBlob(null);
-                      toast.success('Official JEE Community Logo & Banner applied!');
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shrink-0 transition-colors"
-                  >
-                    Apply Official Logo &amp; Banner
-                  </button>
-                </div>
-              )}
-
-              {/* Banner Preview + Upload */}
+              {/* Optional Banner Preview + Upload */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Channel Banner
-                </label>
-                <div className="relative h-28 rounded-xl overflow-hidden bg-slate-900 border border-slate-200 dark:border-slate-800">
-                  <img
-                    src={
-                      channelBannerPreview ||
-                      createChannelBannerSvg(channelNameInput || 'My Channel', channelHandleInput)
-                    }
-                    alt="Channel Banner"
-                    className="w-full h-full object-cover"
-                  />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Channel Banner (Optional)
+                  </label>
+                  {channelBannerPreview &&
+                    !channelBannerPreview.startsWith('data:image/svg+xml') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setChannelBannerBlob(null);
+                          setChannelBannerPreview('');
+                        }}
+                        className="text-[11px] font-semibold text-red-600 hover:underline"
+                      >
+                        Remove Banner
+                      </button>
+                    )}
+                </div>
+                <div className="relative h-24 rounded-xl overflow-hidden bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center">
+                  {channelBannerPreview &&
+                  !channelBannerPreview.startsWith('data:image/svg+xml') ? (
+                    <img
+                      src={channelBannerPreview}
+                      alt="Channel Banner"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-xs text-slate-400">
+                      Simple Clean Channel Header (No Banner)
+                    </span>
+                  )}
                   <label className="absolute bottom-2 right-2 px-3 py-1.5 rounded-lg bg-black/75 hover:bg-black text-white text-xs font-semibold cursor-pointer flex items-center gap-1.5">
                     <ImageIcon className="w-3.5 h-3.5" />
                     <span>Upload Banner</span>
@@ -3323,6 +3391,18 @@ export default function EduTube() {
             </div>
 
             <form onSubmit={handlePublishUpload} className="mt-5 space-y-5">
+              {/* Creator Rules & Earning Banner inside Upload Modal */}
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-slate-800 dark:text-slate-200 leading-relaxed">
+                <div className="font-bold text-amber-700 dark:text-amber-300 mb-0.5 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>EduTube Creator Rules &amp; Earning Info</span>
+                </div>
+                Yahan aap apna <strong>Daily Study Vlog</strong>, <strong>Study Strategy</strong>, aur <strong>Question Solutions</strong> upload kar sakte hain (jisse aapki <strong>Earning</strong> bhi ho sakti hai).{' '}
+                <span className="text-red-600 dark:text-red-400 font-semibold">
+                  Koi bhi faltu ya non-study video upload na karein warna video delete kar diya jayega.
+                </span>
+              </div>
+
               {/* Source Mode Selector: Direct Video File vs External Link */}
               <div className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-slate-950 rounded-lg">
                 <button

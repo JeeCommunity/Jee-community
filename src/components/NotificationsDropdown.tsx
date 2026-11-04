@@ -9,23 +9,17 @@ import { requestNotificationPermission } from '../lib/fcm';
 import { toast } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { renderTextWithLinks } from '../lib/linkify';
-import { JEE_COMMUNITY_OFFICIAL_LOGO_URL } from '../lib/edutube';
 import {
   subscribeSupabaseNotifications,
   markNotificationReadLocal,
   clearAllNotificationsForUser,
 } from '../lib/supabaseHub';
 
-const EDUTUBE_BELL_NOTIF_KEY = 'hasReadEduTubeBellNotif_2026_v1';
-
 export default function NotificationsDropdown() {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [hasReadEduTubeNotif, setHasReadEduTubeNotif] = useState<boolean>(() =>
-    Boolean(localStorage.getItem(EDUTUBE_BELL_NOTIF_KEY))
-  );
   const [pushEnabled, setPushEnabled] = useState(
     typeof Notification !== 'undefined' && Notification.permission === 'granted'
   );
@@ -114,15 +108,9 @@ export default function NotificationsDropdown() {
     }
   };
 
-  const handleEduTubeFeatureClick = () => {
-    localStorage.setItem(EDUTUBE_BELL_NOTIF_KEY, 'true');
-    setHasReadEduTubeNotif(true);
-    setIsOpen(false);
-    navigate('/edutube');
-  };
-
   const handleClearAll = () => {
-    clearAllNotificationsForUser();
+    const ids = notifications.map((n) => n.id).filter(Boolean);
+    clearAllNotificationsForUser(ids);
     setNotifications([]);
     setUnreadCount(0);
     toast.success('Notifications cleared');
@@ -158,7 +146,7 @@ export default function NotificationsDropdown() {
         className="relative p-1.5 text-slate-500 dark:text-slate-400 hover:text-blue-600 transition-colors rounded-full hover:bg-slate-50 dark:hover:bg-slate-800 dark:bg-slate-800 focus:outline-none"
       >
         <Bell className="w-5 h-5" />
-        {(unreadCount > 0 || !hasReadEduTubeNotif) && (
+        {unreadCount > 0 && (
           <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
         )}
       </button>
@@ -222,45 +210,11 @@ export default function NotificationsDropdown() {
               )}
 
             <div className="overflow-y-auto flex-1 p-2 space-y-1">
-              {/* Built-in New Feature Notification for All Old & New Users (0 Firebase Reads) */}
-              <div
-                onClick={handleEduTubeFeatureClick}
-                className={cn(
-                  'p-3 rounded-lg text-sm transition-colors cursor-pointer flex items-start space-x-3',
-                  hasReadEduTubeNotif
-                    ? 'hover:bg-slate-50 dark:hover:bg-slate-800 bg-white dark:bg-slate-900'
-                    : 'bg-red-50/70 dark:bg-red-950/30 hover:bg-red-50 dark:hover:bg-red-950/50 border border-red-200/70 dark:border-red-900/50'
-                )}
-              >
-                <img
-                  src={JEE_COMMUNITY_OFFICIAL_LOGO_URL}
-                  alt="JEE Community"
-                  className="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-slate-200 dark:border-slate-700"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-bold text-slate-900 dark:text-white text-xs">
-                      JEE Community
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold uppercase">
-                      New Feature
-                    </span>
-                  </div>
-                  <p className="text-slate-700 dark:text-slate-300 text-xs mt-1 leading-relaxed">
-                    🎬 <strong>EduTube Creator Hub is Live!</strong> Apna khud ka YouTube-style
-                    channel banayein, Videos &amp; Shorts upload karein aur{' '}
-                    <strong>@jeecommunity</strong> ko subscribe karein!
-                  </p>
-                  <p className="text-[10px] text-red-600 dark:text-red-400 font-semibold mt-1">
-                    Tap to open EduTube &rarr;
-                  </p>
+              {notifications.length === 0 ? (
+                <div className="py-8 px-4 text-center text-xs text-slate-500 dark:text-slate-400">
+                  No new notifications
                 </div>
-                {!hasReadEduTubeNotif && (
-                  <div className="w-2 h-2 bg-red-600 rounded-full mt-1.5 flex-shrink-0"></div>
-                )}
-              </div>
-
-              {notifications.length > 0 && (
+              ) : (
                 <div className="space-y-1">
                   {notifications.map((notif) => (
                     <div

@@ -125,6 +125,31 @@ app.use(express.json());
 // API routes for AI Assistant
 app.use("/api/assistant", assistantRouter);
 
+// VAST 3.0 XML Proxy fallback for preview environment
+app.get("/api/vast-proxy", async (req, res) => {
+  try {
+    const vastUrl =
+      (req.query.url as string) ||
+      "https://crookedagreement.com/d/mwFvzEd.GVN/vVZnGXUm/AeGmI9_uoZWUylckVPXTzcH1lOgTCQzyWMxzLMrtONSzcUA5hN-DxIXzFNfwf";
+    const ua =
+      req.headers["user-agent"] ||
+      "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+    const upstream = await fetch(vastUrl, {
+      headers: {
+        "User-Agent": ua,
+        Referer: "https://jee-community.netlify.app/",
+        Origin: "https://jee-community.netlify.app",
+      },
+    });
+    const xmlText = await upstream.text();
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.status(upstream.status).send(xmlText);
+  } catch (err) {
+    res.status(500).send("<VAST version=\"3.0\"></VAST>");
+  }
+});
+
 // Serve Service Worker dynamically with environment variables
 app.get('/firebase-messaging-sw.js', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

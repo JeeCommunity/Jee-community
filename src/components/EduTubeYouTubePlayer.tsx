@@ -10,6 +10,7 @@ import {
   FastForward,
   Rewind,
 } from 'lucide-react';
+import EduTubeVastAdPlayer from './EduTubeVastAdPlayer';
 
 interface EduTubeYouTubePlayerProps {
   youtubeId: string;
@@ -39,6 +40,8 @@ export default function EduTubeYouTubePlayer({
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [showControls, setShowControls] = useState(true);
+  const [showMidRollAd, setShowMidRollAd] = useState(false);
+  const midRollTriggeredRef = useRef<boolean>(false);
   const hideControlsTimerRef = useRef<any>(null);
 
   const posterImage =
@@ -108,6 +111,8 @@ export default function EduTubeYouTubePlayer({
     setIsEnded(false);
     setCurrentTime(0);
     setDuration(0);
+    setShowMidRollAd(false);
+    midRollTriggeredRef.current = false;
 
     const handleMessage = (event: MessageEvent) => {
       if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) {
@@ -210,6 +215,21 @@ export default function EduTubeYouTubePlayer({
         setIsPlaying(false);
         setIsEnded(true);
       }
+    }
+
+    // Automatic Mid-Roll Video Ad (Video ke beech me ad) for videos >= 2 mins at the 50% / 3-min mark
+    const midRollPoint = Math.min(180, duration * 0.5);
+    if (
+      !isShort &&
+      duration >= 120 &&
+      !midRollTriggeredRef.current &&
+      currentTime >= midRollPoint &&
+      currentTime < midRollPoint + 4
+    ) {
+      midRollTriggeredRef.current = true;
+      sendPlayerCommand('pauseVideo');
+      setIsPlaying(false);
+      setShowMidRollAd(true);
     }
   }, [currentTime, duration, isShort, isEnded]);
 
@@ -375,8 +395,20 @@ export default function EduTubeYouTubePlayer({
         </div>
       )}
 
+      {/* Mid-Roll Video Ad Overlay (Pauses video in the middle, plays skippable ad, then resumes automatically) */}
+      {showMidRollAd && (
+        <EduTubeVastAdPlayer
+          isShort={false}
+          onAdFinished={() => {
+            setShowMidRollAd(false);
+            sendPlayerCommand('playVideo');
+            setIsPlaying(true);
+          }}
+        />
+      )}
+
       {/* EduTube Branded Pause / End Shield - Completely hides YouTube's "More Videos / Related Videos" popup when paused or ended! */}
-      {(!isPlaying || isEnded) && (
+      {(!isPlaying || isEnded) && !showMidRollAd && (
         <div
           onClick={(e) => handleTogglePlay(e)}
           className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-md transition-opacity duration-150"
@@ -433,20 +465,31 @@ export default function EduTubeYouTubePlayer({
             showControls || !isPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
         >
-          {/* Interactive Progress / Seek Bar */}
+          {/* Interactive Progress / Seek Bar with YouTube-style Yellow Mid-Roll Marker */}
           <div className="flex items-center gap-2.5 mb-2">
             <span className="text-[11px] font-mono font-semibold text-white/90 shrink-0">
               {formatTime(currentTime)}
             </span>
-            <input
-              type="range"
-              min={0}
-              max={duration > 0 ? duration : 100}
-              step={0.5}
-              value={currentTime}
-              onChange={handleSeek}
-              className="w-full h-1.5 bg-white/25 rounded-lg appearance-none cursor-pointer accent-red-600"
-            />
+            <div className="relative flex-1 flex items-center">
+              <input
+                type="range"
+                min={0}
+                max={duration > 0 ? duration : 100}
+                step={0.5}
+                value={currentTime}
+                onChange={handleSeek}
+                className="w-full h-1.5 bg-white/25 rounded-lg appearance-none cursor-pointer accent-red-600"
+              />
+              {duration >= 120 && !midRollTriggeredRef.current && (
+                <span
+                  style={{
+                    left: `${Math.min(95, (Math.min(180, duration * 0.5) / duration) * 100)}%`,
+                  }}
+                  className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-amber-400 pointer-events-none shadow"
+                  title="Mid-roll Ad Break"
+                />
+              )}
+            </div>
             <span className="text-[11px] font-mono font-semibold text-white/75 shrink-0">
               {formatTime(duration)}
             </span>
