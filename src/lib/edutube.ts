@@ -1290,7 +1290,19 @@ export async function publishEduTubeVideo(
  */
 export async function updateEduTubeVideoRecord(
   videoId: string,
-  patch: Partial<Pick<EduTubeVideo, 'views' | 'likes' | 'liked_by' | 'comments' | 'video_type' | 'duration'>>
+  patch: Partial<
+    Pick<
+      EduTubeVideo,
+      | 'views'
+      | 'likes'
+      | 'liked_by'
+      | 'comments'
+      | 'video_type'
+      | 'duration'
+      | 'video_url'
+      | 'thumbnail_url'
+    >
+  >
 ): Promise<void> {
   const current = getLocalVideos();
   const target = current.find((v) => v.id === videoId);
@@ -1395,9 +1407,7 @@ export function getEmbedInfo(url: string): {
     return {
       type: 'live_room',
       roomId,
-      embedUrl: `https://meet.jit.si/${encodeURIComponent(
-        roomId
-      )}#config.prejoinPageEnabled=false&config.startWithVideoMuted=false&config.startWithAudioMuted=false&interfaceConfig.SHOW_JITSI_WATERMARK=false`,
+      embedUrl: url,
     };
   }
 

@@ -41,6 +41,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../AuthContext';
 import { createNotification } from '../lib/notifications';
 import EduTubeYouTubePlayer from '../components/EduTubeYouTubePlayer';
+import EduTubeLiveRoomPlayer from '../components/EduTubeLiveRoomPlayer';
 import {
   EduTubeVideo,
   EduTubeChannel,
@@ -163,7 +164,7 @@ export default function EduTube() {
 
   // Go Live Broadcast Studio Modal state
   const [isLiveModalOpen, setIsLiveModalOpen] = useState(false);
-  const [liveMode, setLiveMode] = useState<'youtube_live' | 'camera_room'>('youtube_live');
+  const [liveMode, setLiveMode] = useState<'youtube_live' | 'camera_room'>('camera_room');
   const [liveTitle, setLiveTitle] = useState('');
   const [liveDescription, setLiveDescription] = useState('');
   const [liveTagsInput, setLiveTagsInput] = useState('#live #edutube #study');
@@ -275,6 +276,8 @@ export default function EduTube() {
                   comments: fresh.comments,
                   video_type: fresh.video_type,
                   duration: fresh.duration,
+                  video_url: fresh.video_url || v.video_url,
+                  thumbnail_url: fresh.thumbnail_url || v.thumbnail_url,
                 }
               : v
           )
@@ -807,18 +810,28 @@ export default function EduTube() {
     }
   };
 
-  const handleEndLiveStream = async (video: EduTubeVideo, saveAsReplay: boolean) => {
-    if (saveAsReplay && !video.video_url.startsWith('live://room/')) {
+  const handleEndLiveStream = async (
+    video: EduTubeVideo,
+    saveAsReplay: boolean,
+    recordedVideoUrl?: string,
+    durationFormatted?: string
+  ) => {
+    if (saveAsReplay && (recordedVideoUrl || !video.video_url.startsWith('live://room/'))) {
+      const nextVideoUrl = recordedVideoUrl || video.video_url;
+      const nextDuration = durationFormatted || 'LIVE REPLAY';
       await updateEduTubeVideoRecord(video.id, {
         video_type: 'long',
-        duration: 'LIVE REPLAY',
+        duration: nextDuration,
+        video_url: nextVideoUrl,
       });
       setVideos((prev) =>
         prev.map((v) =>
-          v.id === video.id ? { ...v, video_type: 'long', duration: 'LIVE REPLAY' } : v
+          v.id === video.id
+            ? { ...v, video_type: 'long', duration: nextDuration, video_url: nextVideoUrl }
+            : v
         )
       );
-      toast.success('Live stream ended & saved as Replay on your channel!');
+      toast.success('Live stream ended & saved as Replay Video on your channel!');
     } else {
       await deleteEduTubeVideoRecord(video.id);
       setVideos((prev) => prev.filter((v) => v.id !== video.id));
@@ -1638,19 +1651,18 @@ export default function EduTube() {
                 const embed = getEmbedInfo(activeVideo.video_url);
                 if (embed.type === 'live_room') {
                   return (
-                    <div className="relative w-full aspect-video bg-slate-950">
-                      <iframe
-                        src={embed.embedUrl}
-                        title={activeVideo.title}
-                        className="w-full h-full border-0"
-                        allow="camera; microphone; display-capture; autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                        allowFullScreen
-                      />
-                      <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-red-600 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-lg pointer-events-none">
-                        <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                        <span>LIVE STUDIO ROOM</span>
-                      </div>
-                    </div>
+                    <EduTubeLiveRoomPlayer
+                      videoId={activeVideo.id}
+                      roomId={embed.roomId || activeVideo.id}
+                      title={activeVideo.title}
+                      hostName={activeVideo.author_name}
+                      hostAvatar={activeVideo.author_photo}
+                      thumbnailUrl={activeVideo.thumbnail_url}
+                      isHost={Boolean(user && user.uid === activeVideo.author_uid)}
+                      onEndLiveStream={(saveReplay, recordedUrl, dur) =>
+                        handleEndLiveStream(activeVideo, saveReplay, recordedUrl, dur)
+                      }
+                    />
                   );
                 }
                 if (embed.type === 'youtube' && embed.youtubeId) {

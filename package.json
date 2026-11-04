@@ -35,6 +35,7 @@
     "motion": "^12.23.24",
     "nerdamer": "^1.1.13",
     "nodemailer": "^9.0.5",
+    "peerjs": "^1.5.5",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
