@@ -47,12 +47,7 @@ export default function EduTubeYouTubePlayer({
       : `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
 
   // Direct YouTube embed URL with enablejsapi=1 so React owns the <iframe> 100%
-  // (Ensures mobile Chrome on Netlify always renders the hardware video surface)
   const embedSrc = useMemo(() => {
-    const origin =
-      typeof window !== 'undefined' && window.location?.origin
-        ? window.location.origin
-        : '';
     const params = new URLSearchParams({
       enablejsapi: '1',
       autoplay: '1',
@@ -64,10 +59,6 @@ export default function EduTubeYouTubePlayer({
       fs: '0',
       playsinline: '1',
     });
-    if (origin) {
-      params.set('origin', origin);
-      params.set('widget_referrer', origin);
-    }
     if (isShort) {
       params.set('loop', '1');
       params.set('playlist', youtubeId);

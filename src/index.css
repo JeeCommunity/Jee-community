@@ -27,7 +27,8 @@
 #nl-hud-frame,
 iframe[id^="nl-"],
 iframe[title*="Netlify" i],
-iframe[src*="netlify" i],
+iframe[src*=".netlify/scripts" i],
+iframe[src*="app.netlify.com" i],
 div[id*="netlify"],
 div[id*="nl-hud"] {
   display: none !important;
