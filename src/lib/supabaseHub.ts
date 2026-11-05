@@ -1,15 +1,4 @@
 import { DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY, getCloudConfig } from './edutube';
-import { db } from '../firebase';
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-  orderBy,
-  limit,
-} from 'firebase/firestore';
 
 export type HubRecordType =
   | 'study_session'
@@ -26,9 +15,37 @@ const CLEARED_NOTIFS_TS_KEY = 'jee_hub_cleared_notifs_before_v1';
 const CLEARED_NOTIF_IDS_KEY = 'jee_hub_cleared_notif_ids_v1';
 const SEEN_LIVE_TOAST_IDS_KEY = 'jee_hub_seen_live_toasts_v1';
 
-// In-memory caches to eliminate duplicate network/Firebase requests
+const FAST_POSTS_CACHE_KEY = 'jee_hub_fast_posts_v2';
+const FAST_SESSIONS_CACHE_KEY = 'jee_hub_fast_sessions_v2';
+const FAST_NOTIFS_CACHE_KEY = 'jee_hub_fast_notifs_v2';
+
+// ============================================================================
+// HIGH-SPEED IN-MEMORY CACHES & REQUEST DEDUPLICATION
+// ============================================================================
 const profileMemoryCache = new Map<string, any>();
-const firebaseSeededFlags = new Set<string>();
+const profileInFlight = new Map<string, Promise<any | null>>();
+const inFlightQueries = new Map<string, Promise<any[]>>();
+
+let postsMemoryCache: any[] | null = null;
+let postsLastFetchedAt = 0;
+
+let sessionsMemoryCache: { date: string; list: any[]; ts: number } | null = null;
+const mySessionMemoryCache = new Map<string, any>();
+
+const commentsMemoryCache = new Map<string, any[]>();
+const notesMemoryCache = new Map<string, any[]>();
+const notifsMemoryCache = new Map<string, any[]>();
+
+/**
+ * Prevents raw multi-kilobyte base64 strings from bloating Supabase JSON rows.
+ */
+function sanitizePhotoUrl(photo?: string | null): string {
+  if (!photo || typeof photo !== 'string') return '';
+  if (photo.startsWith('data:image/') && photo.length > 1800) {
+    return '';
+  }
+  return photo;
+}
 
 function getSupabaseHeaders(extra?: Record<string, string>): Record<string, string> {
   const cfg = getCloudConfig();
@@ -78,12 +95,13 @@ function encodeHubRow(params: {
   payload: any;
   created_at?: string;
 }) {
+  const cleanPhoto = sanitizePhotoUrl(params.author_photo);
   return {
     id: params.id,
     title: params.title || 'Record',
     description: params.description || '',
     video_url: `blob://${params.recordType}`,
-    thumbnail_url: params.author_photo || '',
+    thumbnail_url: cleanPhoto,
     duration: '00:00',
     video_type: params.recordType,
     subject: params.subject || params.recordType,
@@ -91,7 +109,7 @@ function encodeHubRow(params: {
     author_uid: params.author_uid || 'system',
     author_name: params.author_name || 'User',
     author_username: params.author_username || 'user',
-    author_photo: params.author_photo || '',
+    author_photo: cleanPhoto,
     views: Number(params.views) || 0,
     likes: Number(params.likes) || 0,
     liked_by: Array.isArray(params.liked_by) ? params.liked_by : [],
@@ -149,35 +167,48 @@ export async function deleteHubRow(rowId: string): Promise<boolean> {
   }
 }
 
+/**
+ * Deduplicated query helper: if two components request the exact same query simultaneously,
+ * they share a single network round-trip.
+ */
 export async function queryHubRows(queryString: string): Promise<any[]> {
-  try {
-    const res = await fetch(`${getSupabaseRestUrl()}?${queryString}`, {
-      headers: getSupabaseHeaders(),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
-  } catch (err) {
-    console.warn('Supabase queryHubRows error:', err);
-    return [];
-  }
+  const existingPromise = inFlightQueries.get(queryString);
+  if (existingPromise) return existingPromise;
+
+  const promise = (async () => {
+    try {
+      const res = await fetch(`${getSupabaseRestUrl()}?${queryString}`, {
+        headers: getSupabaseHeaders(),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (err) {
+      console.warn('Supabase queryHubRows error:', err);
+      return [];
+    } finally {
+      inFlightQueries.delete(queryString);
+    }
+  })();
+
+  inFlightQueries.set(queryString, promise);
+  return promise;
 }
 
 // ============================================================================
-// 1. SMART USER PROFILE CACHE (0 Repeated Firebase Reads)
+// 1. SMART USER PROFILE CACHE (0 Firebase Reads, Deduplicated In-Flight)
 // ============================================================================
 
-export async function getCachedUserProfile(uid: string): Promise<any | null> {
+export function getInstantCachedUserProfile(uid: string): any | null {
   if (!uid) return null;
   if (profileMemoryCache.has(uid)) {
     return profileMemoryCache.get(uid);
   }
-
   try {
     const localRaw = localStorage.getItem(`jee_uprofile_${uid}`);
     if (localRaw) {
       const parsed = JSON.parse(localRaw);
-      if (parsed && Date.now() - (parsed._cachedAt || 0) < 12 * 3600 * 1000) {
+      if (parsed) {
         profileMemoryCache.set(uid, parsed);
         return parsed;
       }
@@ -185,57 +216,69 @@ export async function getCachedUserProfile(uid: string): Promise<any | null> {
   } catch {
     // ignore
   }
-
-  // Try Supabase profile row first (0 Firebase reads)
-  const rows = await queryHubRows(
-    `select=*&id=eq.${encodeURIComponent(`uprofile_${uid}`)}&limit=1`
-  );
-  if (rows.length > 0) {
-    const decoded = decodeHubPayload(rows[0]);
-    if (decoded) {
-      profileMemoryCache.set(uid, decoded);
-      try {
-        localStorage.setItem(
-          `jee_uprofile_${uid}`,
-          JSON.stringify({ ...decoded, _cachedAt: Date.now() })
-        );
-      } catch {
-        // ignore
-      }
-      return decoded;
-    }
-  }
-
-  // Fallback once to Firebase `users/{uid}` and cache in Supabase for everyone
-  try {
-    const snap = await getDoc(doc(db, 'users', uid));
-    if (snap.exists()) {
-      const data = { uid, ...snap.data() };
-      await cacheUserProfileInSupabase(uid, data);
-      return data;
-    }
-  } catch {
-    // ignore
-  }
-
   return null;
+}
+
+export async function getCachedUserProfile(uid: string): Promise<any | null> {
+  if (!uid) return null;
+  const instant = getInstantCachedUserProfile(uid);
+  if (instant && Date.now() - (instant._cachedAt || 0) < 12 * 3600 * 1000) {
+    return instant._notFound ? null : instant;
+  }
+
+  const inflight = profileInFlight.get(uid);
+  if (inflight) return inflight;
+
+  const fetchPromise = (async () => {
+    try {
+      const rows = await queryHubRows(
+        `select=*&id=eq.${encodeURIComponent(`uprofile_${uid}`)}&limit=1`
+      );
+      if (rows.length > 0) {
+        const decoded = decodeHubPayload(rows[0]);
+        if (decoded) {
+          decoded.photoURL = sanitizePhotoUrl(decoded.photoURL);
+          const withTs = { ...decoded, _cachedAt: Date.now() };
+          profileMemoryCache.set(uid, withTs);
+          try {
+            localStorage.setItem(`jee_uprofile_${uid}`, JSON.stringify(withTs));
+          } catch {
+            // ignore
+          }
+          return decoded;
+        }
+      }
+
+      // Negative cache for 15 minutes so missing profiles don't trigger repeated network requests
+      const fallbackEntry = instant || { _notFound: true, _cachedAt: Date.now() };
+      profileMemoryCache.set(uid, fallbackEntry);
+      return instant && !instant._notFound ? instant : null;
+    } finally {
+      profileInFlight.delete(uid);
+    }
+  })();
+
+  profileInFlight.set(uid, fetchPromise);
+  return fetchPromise;
 }
 
 export async function cacheUserProfileInSupabase(uid: string, profileData: any): Promise<void> {
   if (!uid || !profileData) return;
+  const cleanPhoto = sanitizePhotoUrl(profileData.photoURL || profileData.avatar || '');
   const clean = {
     uid,
     fullName: profileData.fullName || profileData.name || 'Student',
     username: profileData.username || 'student',
-    photoURL: profileData.photoURL || profileData.avatar || '',
+    photoURL: cleanPhoto,
     role: profileData.role || 'user',
     targetExam: profileData.targetExam || 'JEE',
     cheersEnabled: profileData.cheersEnabled !== false,
     campus: profileData.campus || { totalCoins: 0, totalXP: 0 },
   };
-  profileMemoryCache.set(uid, clean);
+  const withTs = { ...clean, _cachedAt: Date.now() };
+  profileMemoryCache.set(uid, withTs);
   try {
-    localStorage.setItem(`jee_uprofile_${uid}`, JSON.stringify({ ...clean, _cachedAt: Date.now() }));
+    localStorage.setItem(`jee_uprofile_${uid}`, JSON.stringify(withTs));
   } catch {
     // ignore
   }
@@ -248,7 +291,7 @@ export async function cacheUserProfileInSupabase(uid: string, profileData: any):
       author_uid: uid,
       author_name: clean.fullName,
       author_username: clean.username,
-      author_photo: clean.photoURL,
+      author_photo: cleanPhoto,
       payload: clean,
     })
   );
@@ -319,6 +362,8 @@ export function clearAllNotificationsForUser(idsToClear: string[] = []): void {
       const merged = Array.from(new Set([...idsToClear, ...existing])).slice(0, 400);
       localStorage.setItem(CLEARED_NOTIF_IDS_KEY, JSON.stringify(merged));
     }
+    notifsMemoryCache.clear();
+    localStorage.removeItem(FAST_NOTIFS_CACHE_KEY);
   } catch {
     // ignore
   }
@@ -363,13 +408,14 @@ export async function createSupabaseNotification(data: {
 }): Promise<void> {
   if (!data.recipientId || data.recipientId === data.senderId) return;
 
+  const cleanAvatar = sanitizePhotoUrl(data.senderAvatar);
   const id = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const payload: HubNotificationPayload = {
     id,
     recipientId: data.recipientId,
     senderId: data.senderId,
     senderName: data.senderName || 'Community Member',
-    senderAvatar: data.senderAvatar || '',
+    senderAvatar: cleanAvatar,
     type: data.type,
     postId: data.postId,
     postContent: data.postContent,
@@ -394,7 +440,7 @@ export async function createSupabaseNotification(data: {
       chapter: data.recipientId,
       author_uid: data.senderId,
       author_name: data.senderName,
-      author_photo: data.senderAvatar,
+      author_photo: cleanAvatar,
       payload,
     })
   );
@@ -404,7 +450,6 @@ export async function createSupabaseNotification(data: {
 
 /**
  * Broadcasts ONE single global notification row (`chapter: 'ALL'`) to all users in Supabase!
- * Triggered automatically when ANY user uploads a Video/Short, Community Post, or Notes Hub PDF.
  */
 export async function sendSupabaseGlobalNotification(
   senderId: string,
@@ -413,13 +458,14 @@ export async function sendSupabaseGlobalNotification(
   type: string,
   extraData: Record<string, any> = {}
 ): Promise<void> {
+  const cleanAvatar = sanitizePhotoUrl(senderAvatar);
   const id = `notif_global_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const payload: HubNotificationPayload = {
     id,
     recipientId: 'ALL',
     senderId: senderId || 'system',
     senderName: senderName || 'JEE Community Member',
-    senderAvatar: senderAvatar || '',
+    senderAvatar: cleanAvatar,
     type,
     postId: extraData.postId,
     postContent: extraData.postContent,
@@ -449,7 +495,7 @@ export async function sendSupabaseGlobalNotification(
       chapter: 'ALL',
       author_uid: senderId || 'system',
       author_name: senderName || 'JEE Community',
-      author_photo: senderAvatar || '',
+      author_photo: cleanAvatar,
       payload,
     })
   );
@@ -460,7 +506,7 @@ export async function sendSupabaseGlobalNotification(
 export async function fetchUserSupabaseNotifications(uid: string): Promise<any[]> {
   if (!uid) return [];
   const rows = await queryHubRows(
-    `select=*&video_type=eq.hub_notification&chapter=in.(ALL,${encodeURIComponent(uid)})&order=created_at.desc&limit=40`
+    `select=*&video_type=eq.hub_notification&chapter=in.(ALL,${encodeURIComponent(uid)})&order=created_at.desc&limit=35`
   );
   const readIds = getReadNotificationIds();
   const clearedIds = getClearedNotificationIds();
@@ -470,7 +516,6 @@ export async function fetchUserSupabaseNotifications(uid: string): Promise<any[]
   for (const row of rows) {
     const p = decodeHubPayload<HubNotificationPayload>(row);
     if (!p) continue;
-    // Don't show a global notification to the user who uploaded it themselves
     if (p.recipientId === 'ALL' && p.senderId === uid) continue;
     const notifId = p.id || row.id;
     if (clearedIds.includes(notifId) || clearedIds.includes(row.id)) continue;
@@ -481,7 +526,8 @@ export async function fetchUserSupabaseNotifications(uid: string): Promise<any[]
     const isRead = Boolean(p.isRead || readIds.includes(p.id) || readIds.includes(row.id));
     results.push({
       ...p,
-      id: p.id || row.id,
+      senderAvatar: sanitizePhotoUrl(p.senderAvatar),
+      id: notifId,
       isRead,
       createdAt: {
         toDate: () => new Date(createdAtMs),
@@ -490,7 +536,9 @@ export async function fetchUserSupabaseNotifications(uid: string): Promise<any[]
     });
   }
 
-  return results.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
+  const sorted = results.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
+  notifsMemoryCache.set(uid, sorted);
+  return sorted;
 }
 
 export function subscribeSupabaseNotifications(
@@ -499,6 +547,12 @@ export function subscribeSupabaseNotifications(
 ): () => void {
   let active = true;
   let initialLoadDone = false;
+
+  // Instant 0ms cache emission
+  const cached = notifsMemoryCache.get(uid);
+  if (cached) {
+    onUpdate(cached, undefined);
+  }
 
   const load = async () => {
     if (!active || !uid) return;
@@ -509,7 +563,6 @@ export function subscribeSupabaseNotifications(
     const seenToasts = getSeenLiveToastIds();
 
     if (!initialLoadDone) {
-      // Mark existing notifications as already toast-seen so we only toast new live arrivals
       list.slice(0, 15).forEach((n) => markSeenLiveToastId(n.id));
       initialLoadDone = true;
     } else {
@@ -530,7 +583,7 @@ export function subscribeSupabaseNotifications(
     if (document.visibilityState === 'visible') {
       load();
     }
-  }, 5000);
+  }, 6000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'hub_notification') {
@@ -561,6 +614,7 @@ function normalizeSessionTimestamps(data: any): any {
   return {
     ...data,
     id: data.uid || data.id,
+    photoURL: sanitizePhotoUrl(data.photoURL),
     lastUpdatedMs,
     lastUpdated: {
       toMillis: () => lastUpdatedMs,
@@ -569,47 +623,92 @@ function normalizeSessionTimestamps(data: any): any {
   };
 }
 
+function getInstantSessionsCache(todayDate: string): any[] | null {
+  if (sessionsMemoryCache && sessionsMemoryCache.date === todayDate) {
+    return sessionsMemoryCache.list;
+  }
+  try {
+    const raw = localStorage.getItem(FAST_SESSIONS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.date === todayDate && Array.isArray(parsed.list)) {
+        const hydrated = parsed.list.map(normalizeSessionTimestamps).filter(Boolean);
+        sessionsMemoryCache = { date: todayDate, list: hydrated, ts: parsed.ts || 0 };
+        return hydrated;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 export async function getSupabaseStudySession(uid: string): Promise<any | null> {
   if (!uid) return null;
+  const localMem = mySessionMemoryCache.get(uid);
   const rows = await queryHubRows(
     `select=*&id=eq.${encodeURIComponent(`session_${uid}`)}&limit=1`
   );
   if (rows.length > 0) {
     const decoded = decodeHubPayload(rows[0]);
-    if (decoded) return normalizeSessionTimestamps(decoded);
-  }
-
-  // One-time seamless migration from Firebase if user had a study session before
-  if (!firebaseSeededFlags.has(`session_${uid}`)) {
-    firebaseSeededFlags.add(`session_${uid}`);
-    try {
-      const snap = await getDoc(doc(db, 'study_sessions', uid));
-      if (snap.exists()) {
-        const fbData = snap.data();
-        const normalized = normalizeSessionTimestamps({ id: uid, uid, ...fbData });
-        await saveSupabaseStudySession(uid, normalized);
-        return normalized;
+    if (decoded) {
+      const norm = normalizeSessionTimestamps(decoded);
+      if (localMem && (localMem.lastUpdatedMs || 0) > (norm.lastUpdatedMs || 0)) {
+        return localMem;
       }
-    } catch {
-      // ignore
+      mySessionMemoryCache.set(uid, norm);
+      return norm;
     }
   }
-  return null;
+  return localMem || null;
 }
 
 export async function saveSupabaseStudySession(uid: string, sessionData: any): Promise<any> {
-  const existing = await getSupabaseStudySessionOnceNoFallback(uid);
-  const merged = {
+  const existing = mySessionMemoryCache.get(uid) || (await getSupabaseStudySessionOnceNoFallback(uid));
+  const merged: any = {
     ...(existing || {}),
     ...sessionData,
     id: uid,
     uid,
+    photoURL: sanitizePhotoUrl(sessionData.photoURL ?? existing?.photoURL),
     lastUpdatedMs: Date.now(),
   };
-  // Strip Firestore FieldValue objects like serverTimestamp() before JSON serialization
+
+  // Protect against accidental 0-time reset on the same day if a network request failed earlier
+  if (
+    existing &&
+    existing.dailyDate &&
+    merged.dailyDate === existing.dailyDate &&
+    (Number(merged.accumulatedTime) || 0) < (Number(existing.accumulatedTime) || 0)
+  ) {
+    merged.accumulatedTime = existing.accumulatedTime;
+  }
+
   if (merged.lastUpdated && typeof merged.lastUpdated.toMillis !== 'function') {
     delete merged.lastUpdated;
   }
+
+  // Keep weeklyData compact (latest 10 days max) so session rows stay < 2 KB
+  if (merged.weeklyData && typeof merged.weeklyData === 'object') {
+    const keys = Object.keys(merged.weeklyData).sort();
+    if (keys.length > 10) {
+      const nextWeekly: Record<string, any> = {};
+      for (const k of keys.slice(-10)) {
+        nextWeekly[k] = merged.weeklyData[k];
+      }
+      merged.weeklyData = nextWeekly;
+    }
+  }
+
+  const normalized = normalizeSessionTimestamps(merged);
+  mySessionMemoryCache.set(uid, normalized);
+
+  // Optimistically update in-memory sessions list
+  if (sessionsMemoryCache) {
+    const filtered = sessionsMemoryCache.list.filter((s) => (s.uid || s.id) !== uid);
+    sessionsMemoryCache.list = [normalized, ...filtered];
+  }
+  emitHubSync('study_session', uid);
 
   await upsertHubRow(
     encodeHubRow({
@@ -630,7 +729,7 @@ export async function saveSupabaseStudySession(uid: string, sessionData: any): P
   );
 
   emitHubSync('study_session', uid);
-  return normalizeSessionTimestamps(merged);
+  return normalized;
 }
 
 async function getSupabaseStudySessionOnceNoFallback(uid: string): Promise<any | null> {
@@ -644,40 +743,30 @@ async function getSupabaseStudySessionOnceNoFallback(uid: string): Promise<any |
 }
 
 export async function fetchAllSupabaseStudySessions(todayDate: string): Promise<any[]> {
+  // Share recent result if fetched within last 1.8s (prevents duplicate polling from Layout + LiveStudy)
+  if (
+    sessionsMemoryCache &&
+    sessionsMemoryCache.date === todayDate &&
+    Date.now() - sessionsMemoryCache.ts < 1800
+  ) {
+    return sessionsMemoryCache.list;
+  }
+
+  // Only fetch today's study sessions or currently studying sessions!
   const rows = await queryHubRows(
-    `select=*&video_type=eq.study_session&order=created_at.desc&limit=150`
+    `select=*&video_type=eq.study_session&or=(subject.eq.${encodeURIComponent(todayDate)},chapter.eq.studying)&limit=80`
   );
 
   const map = new Map<string, any>();
   for (const row of rows) {
     const decoded = decodeHubPayload(row);
     if (!decoded || !decoded.uid) continue;
-    map.set(decoded.uid, normalizeSessionTimestamps(decoded));
-  }
-
-  // One-time seed of today's Firebase study sessions if Supabase has < 2 sessions
-  const seedKey = `seeded_all_sessions_${todayDate}`;
-  if (map.size < 2 && !firebaseSeededFlags.has(seedKey)) {
-    firebaseSeededFlags.add(seedKey);
-    try {
-      const q = query(
-        collection(db, 'study_sessions'),
-        where('dailyDate', '==', todayDate),
-        limit(50)
-      );
-      const snap = await getDocs(q);
-      for (const docSnap of snap.docs) {
-        const d = docSnap.data();
-        const uid = docSnap.id;
-        if (!map.has(uid)) {
-          const norm = normalizeSessionTimestamps({ id: uid, uid, ...d });
-          map.set(uid, norm);
-          saveSupabaseStudySession(uid, norm).catch(() => {});
-        }
-      }
-    } catch {
-      // ignore if Firebase quota reached
-    }
+    const norm = normalizeSessionTimestamps(decoded);
+    const localMem = mySessionMemoryCache.get(decoded.uid);
+    const latest =
+      localMem && (localMem.lastUpdatedMs || 0) > (norm.lastUpdatedMs || 0) ? localMem : norm;
+    map.set(decoded.uid, latest);
+    mySessionMemoryCache.set(decoded.uid, latest);
   }
 
   const allSessions: any[] = [];
@@ -704,7 +793,7 @@ export async function fetchAllSupabaseStudySessions(todayDate: string): Promise<
     }
   }
 
-  return allSessions.sort((a, b) => {
+  const sorted = allSessions.sort((a, b) => {
     const getTotal = (s: any) => {
       let total = s.accumulatedTime || 0;
       if (s.dailyDate !== todayDate) return 0;
@@ -717,6 +806,27 @@ export async function fetchAllSupabaseStudySessions(todayDate: string): Promise<
     };
     return getTotal(b) - getTotal(a);
   });
+
+  sessionsMemoryCache = { date: todayDate, list: sorted, ts: Date.now() };
+  try {
+    localStorage.setItem(
+      FAST_SESSIONS_CACHE_KEY,
+      JSON.stringify({
+        date: todayDate,
+        ts: Date.now(),
+        list: sorted.slice(0, 30).map((s) => {
+          const copy = { ...s };
+          delete copy.lastUpdated;
+          delete copy.weeklyData;
+          return copy;
+        }),
+      })
+    );
+  } catch {
+    // ignore
+  }
+
+  return sorted;
 }
 
 export function subscribeSupabaseStudySessions(
@@ -726,26 +836,42 @@ export function subscribeSupabaseStudySessions(
 ): () => void {
   let active = true;
 
+  // Instant 0ms cache hydration before network request
+  const cachedAll = getInstantSessionsCache(todayDate);
+  const cachedMine =
+    (uid && mySessionMemoryCache.get(uid)) ||
+    (cachedAll ? cachedAll.find((s) => (s.uid || s.id) === uid) || null : null);
+  if (cachedAll) {
+    onUpdate(cachedAll, cachedMine);
+  }
+
   const refresh = async () => {
     if (!active) return;
-    const [all, mine] = await Promise.all([
-      fetchAllSupabaseStudySessions(todayDate),
-      uid ? getSupabaseStudySession(uid) : Promise.resolve(null),
-    ]);
+    const all = await fetchAllSupabaseStudySessions(todayDate);
+    if (!active) return;
+    let mine = uid ? all.find((s) => (s.uid || s.id) === uid) || mySessionMemoryCache.get(uid) || null : null;
+    if (uid && !mine) {
+      mine = await getSupabaseStudySession(uid);
+    }
     if (!active) return;
     onUpdate(all, mine);
   };
 
   refresh();
-  // Live snapshot every 4 seconds (0 Firebase reads!)
   const timer = setInterval(() => {
     if (document.visibilityState === 'visible') {
       refresh();
     }
-  }, 4000);
+  }, 4500);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'study_session') {
+      if (sessionsMemoryCache && e?.detail?.id) {
+        onUpdate(
+          sessionsMemoryCache.list,
+          uid ? mySessionMemoryCache.get(uid) || null : null
+        );
+      }
       refresh();
     }
   };
@@ -776,23 +902,6 @@ export async function fetchSupabaseStudyGroups(uid: string): Promise<any[]> {
     }
   }
 
-  // One-time migration from Firebase `study_groups` for this user
-  const seedKey = `seeded_groups_${uid}`;
-  if (groupsMap.size === 0 && !firebaseSeededFlags.has(seedKey)) {
-    firebaseSeededFlags.add(seedKey);
-    try {
-      const q = query(collection(db, 'study_groups'), where('members', 'array-contains', uid));
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        const gData = { id: d.id, shortCode: d.id, ...d.data(), messages: [] };
-        groupsMap.set(d.id, gData);
-        await saveSupabaseStudyGroup(gData);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
   return Array.from(groupsMap.values());
 }
 
@@ -804,20 +913,6 @@ export async function getSupabaseStudyGroupByCode(shortCode: string): Promise<an
   if (rows.length > 0) {
     const decoded = decodeHubPayload(rows[0]);
     if (decoded) return decoded;
-  }
-
-  // Check Firebase fallback once if group was created before Supabase migration
-  try {
-    const q = query(collection(db, 'study_groups'), where('shortCode', '==', code));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const d = snap.docs[0];
-      const gData = { id: d.id, shortCode: code, ...d.data(), messages: [] };
-      await saveSupabaseStudyGroup(gData);
-      return gData;
-    }
-  } catch {
-    // ignore
   }
   return null;
 }
@@ -847,7 +942,7 @@ export async function saveSupabaseStudyGroup(groupData: any): Promise<any> {
       chapter: code,
       author_uid: merged.creatorId || 'user',
       author_name: merged.name || 'Study Group',
-      author_photo: merged.photoURL || '',
+      author_photo: sanitizePhotoUrl(merged.photoURL),
       liked_by: Array.isArray(merged.members) ? merged.members : [],
       payload: merged,
     })
@@ -882,7 +977,7 @@ export async function addSupabaseGroupMessage(
   };
 
   const currentMsgs = Array.isArray(group.messages) ? group.messages : [];
-  const nextMsgs = [...currentMsgs, newMsg].slice(-80); // Keep latest 80 messages fast & compact
+  const nextMsgs = [...currentMsgs, newMsg].slice(-80);
 
   await saveSupabaseStudyGroup({
     ...group,
@@ -952,12 +1047,13 @@ export function subscribeSupabaseGroupMessages(
 }
 
 // ============================================================================
-// 5. NOTES HUB (`notes_hub` in Supabase + Instant Broadcast Notification)
+// 5. NOTES HUB (`notes_hub` in Supabase + Instant Cache)
 // ============================================================================
 
 export async function fetchSupabaseNotes(category: string, subject: string): Promise<any[]> {
+  const cacheKey = `${category}__${subject}`;
   const rows = await queryHubRows(
-    `select=*&video_type=eq.notes_hub&chapter=eq.${encodeURIComponent(category)}&subject=eq.${encodeURIComponent(subject)}&order=created_at.desc&limit=150`
+    `select=*&video_type=eq.notes_hub&chapter=eq.${encodeURIComponent(category)}&subject=eq.${encodeURIComponent(subject)}&order=created_at.desc&limit=120`
   );
 
   const notesMap = new Map<string, any>();
@@ -977,63 +1073,11 @@ export async function fetchSupabaseNotes(category: string, subject: string): Pro
     });
   }
 
-  // One-time seamless migration of existing Firebase `notes_hub` items for this category+subject
-  const seedKey = `notes_${category}_${subject}`;
-  if (notesMap.size === 0 && !firebaseSeededFlags.has(seedKey)) {
-    firebaseSeededFlags.add(seedKey);
-    try {
-      const q = query(
-        collection(db, 'notes_hub'),
-        where('category', '==', category),
-        where('subject', '==', subject)
-      );
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        const fbData = d.data();
-        const ms = fbData.createdAt?.toMillis ? fbData.createdAt.toMillis() : Date.now();
-        const noteId = `note_${d.id}`;
-        const noteObj = {
-          id: noteId,
-          title: fbData.title || 'Study Resource',
-          description: fbData.description || '',
-          category,
-          subject,
-          fileUrl: fbData.fileUrl || '',
-          uploadedBy: fbData.uploadedBy || { uid: 'system', name: 'Contributor', avatar: null },
-          createdAtMs: ms,
-          downloads: fbData.downloads || 0,
-          views: fbData.views || 0,
-        };
-        notesMap.set(noteId, {
-          ...noteObj,
-          createdAt: { toMillis: () => ms, toDate: () => new Date(ms) },
-        });
-        upsertHubRow(
-          encodeHubRow({
-            id: noteId,
-            recordType: 'notes_hub',
-            title: noteObj.title,
-            description: noteObj.description,
-            subject,
-            chapter: category,
-            author_uid: noteObj.uploadedBy.uid || 'system',
-            author_name: noteObj.uploadedBy.name || 'Contributor',
-            author_photo: noteObj.uploadedBy.avatar || '',
-            views: noteObj.views,
-            likes: noteObj.downloads,
-            payload: noteObj,
-            created_at: new Date(ms).toISOString(),
-          })
-        ).catch(() => {});
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return Array.from(notesMap.values()).sort(
+  const sorted = Array.from(notesMap.values()).sort(
     (a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)
   );
+  notesMemoryCache.set(cacheKey, sorted);
+  return sorted;
 }
 
 export async function createSupabaseNote(params: {
@@ -1046,6 +1090,7 @@ export async function createSupabaseNote(params: {
 }): Promise<any> {
   const nowMs = Date.now();
   const id = `note_${nowMs}_${Math.random().toString(36).slice(2, 7)}`;
+  const cleanAvatar = sanitizePhotoUrl(params.uploadedBy.avatar);
   const payload = {
     id,
     title: params.title,
@@ -1053,7 +1098,7 @@ export async function createSupabaseNote(params: {
     category: params.category,
     subject: params.subject,
     fileUrl: params.fileUrl,
-    uploadedBy: params.uploadedBy,
+    uploadedBy: { ...params.uploadedBy, avatar: cleanAvatar },
     createdAtMs: nowMs,
     downloads: 0,
     views: 1,
@@ -1069,18 +1114,17 @@ export async function createSupabaseNote(params: {
       chapter: params.category,
       author_uid: params.uploadedBy.uid,
       author_name: params.uploadedBy.name,
-      author_photo: params.uploadedBy.avatar || '',
+      author_photo: cleanAvatar,
       views: 1,
       likes: 0,
       payload,
     })
   );
 
-  // Automatically notify ALL users in the community about the new Notes Hub upload!
-  await sendSupabaseGlobalNotification(
+  sendSupabaseGlobalNotification(
     params.uploadedBy.uid,
     params.uploadedBy.name,
-    params.uploadedBy.avatar || '',
+    cleanAvatar,
     'note_upload',
     {
       noteId: id,
@@ -1089,7 +1133,7 @@ export async function createSupabaseNote(params: {
       noteSubject: params.subject,
       targetUrl: '/notes',
     }
-  );
+  ).catch(() => {});
 
   emitHubSync('notes_hub', id);
   return payload;
@@ -1117,7 +1161,7 @@ export async function deleteSupabaseNote(noteId: string): Promise<void> {
 }
 
 // ============================================================================
-// 6. COMMUNITY POSTS & COMMENTS (`community_post` & `post_comment` in Supabase)
+// 6. COMMUNITY POSTS (`community_post` in Supabase - 0ms Instant Cache!)
 // ============================================================================
 
 function hydratePostTimestamps(post: any): any {
@@ -1129,8 +1173,16 @@ function hydratePostTimestamps(post: any): any {
       : post.createdAt
       ? new Date(post.createdAt).getTime()
       : Date.now();
+  const minViewsFromEngagement =
+    (Number(post.likesCount) || 0) * 4 +
+    (Number(post.dislikesCount) || 0) * 2 +
+    (Number(post.commentsCount) || 0) * 3 +
+    1;
+  const resolvedViews = Math.max(Number(post.viewsCount) || 0, minViewsFromEngagement);
   return {
     ...post,
+    viewsCount: resolvedViews,
+    authorPhoto: sanitizePhotoUrl(post.authorPhoto),
     createdAtMs: createdMs,
     createdAt: {
       toDate: () => new Date(createdMs),
@@ -1139,9 +1191,55 @@ function hydratePostTimestamps(post: any): any {
   };
 }
 
-export async function fetchSupabaseCommunityPosts(): Promise<any[]> {
+function sortCommunityPosts(list: any[]): any[] {
+  return [...list].sort((a, b) => {
+    if (a.isPinned && !b.isPinned) return -1;
+    if (!a.isPinned && b.isPinned) return 1;
+    return (b.createdAtMs || 0) - (a.createdAtMs || 0);
+  });
+}
+
+function saveFastPostsCache(posts: any[]) {
+  postsMemoryCache = posts;
+  postsLastFetchedAt = Date.now();
+  try {
+    const serializable = posts.slice(0, 40).map((p) => {
+      const copy = { ...p };
+      delete copy.createdAt;
+      return copy;
+    });
+    localStorage.setItem(FAST_POSTS_CACHE_KEY, JSON.stringify(serializable));
+  } catch {
+    // ignore storage quota
+  }
+}
+
+export function getInstantCommunityPosts(): any[] {
+  if (postsMemoryCache && postsMemoryCache.length > 0) {
+    return postsMemoryCache;
+  }
+  try {
+    const raw = localStorage.getItem(FAST_POSTS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        postsMemoryCache = sortCommunityPosts(parsed.map(hydratePostTimestamps));
+        return postsMemoryCache;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export async function fetchSupabaseCommunityPosts(forceNetwork = false): Promise<any[]> {
+  if (!forceNetwork && postsMemoryCache && Date.now() - postsLastFetchedAt < 2000) {
+    return postsMemoryCache;
+  }
+
   const rows = await queryHubRows(
-    `select=*&video_type=eq.community_post&order=created_at.desc&limit=80`
+    `select=*&video_type=eq.community_post&order=created_at.desc&limit=65`
   );
 
   const postsMap = new Map<string, any>();
@@ -1159,40 +1257,11 @@ export async function fetchSupabaseCommunityPosts(): Promise<any[]> {
     );
   }
 
-  // One-time background seed of recent Firebase posts so existing community posts remain visible
-  if (postsMap.size < 5 && !firebaseSeededFlags.has('seeded_community_posts')) {
-    firebaseSeededFlags.add('seeded_community_posts');
-    try {
-      const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(25));
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        const fbData = d.data();
-        if (fbData.isMigrationNotice) continue;
-        if (!postsMap.has(d.id)) {
-          const createdMs = fbData.createdAt?.toMillis
-            ? fbData.createdAt.toMillis()
-            : fbData.createdAt?.toDate
-            ? fbData.createdAt.toDate().getTime()
-            : Date.now();
-          const normalized = hydratePostTimestamps({
-            id: d.id,
-            ...fbData,
-            createdAtMs: createdMs,
-          });
-          postsMap.set(d.id, normalized);
-          saveSupabaseCommunityPost(normalized, false).catch(() => {});
-        }
-      }
-    } catch {
-      // ignore if Firebase quota reached
-    }
+  const sorted = sortCommunityPosts(Array.from(postsMap.values()));
+  if (sorted.length > 0 || !postsMemoryCache) {
+    saveFastPostsCache(sorted);
   }
-
-  return Array.from(postsMap.values()).sort((a, b) => {
-    if (a.isPinned && !b.isPinned) return -1;
-    if (!a.isPinned && b.isPinned) return 1;
-    return (b.createdAtMs || 0) - (a.createdAtMs || 0);
-  });
+  return sorted;
 }
 
 export async function saveSupabaseCommunityPost(
@@ -1212,6 +1281,7 @@ export async function saveSupabaseCommunityPost(
       ? postData.createdAt.toMillis()
       : Date.now();
 
+  const cleanPhoto = sanitizePhotoUrl(postData.authorPhoto || authorProfile?.photoURL || '');
   const cleanPost = {
     ...postData,
     id: rawId,
@@ -1222,17 +1292,25 @@ export async function saveSupabaseCommunityPost(
       authorProfile?.username ||
       'Student',
     authorUsername: postData.authorUsername || authorProfile?.username || 'student',
-    authorPhoto: postData.authorPhoto || authorProfile?.photoURL || '',
+    authorPhoto: cleanPhoto,
     likesCount: Number(postData.likesCount) || 0,
     dislikesCount: Number(postData.dislikesCount) || 0,
     commentsCount: Number(postData.commentsCount) || 0,
+    viewsCount: Math.max(Number(postData.viewsCount) || 1, 1),
     likedBy: Array.isArray(postData.likedBy) ? postData.likedBy : [],
     dislikedBy: Array.isArray(postData.dislikedBy) ? postData.dislikedBy : [],
   };
 
-  // Remove non-serializable Firestore Date/Timestamp methods before saving JSON
   delete cleanPost.createdAt;
   delete cleanPost.expiresAt;
+
+  const hydrated = hydratePostTimestamps(cleanPost);
+
+  // Optimistically update in-memory + localStorage cache in 0ms!
+  const currentList = getInstantCommunityPosts();
+  const withoutThis = currentList.filter((p) => p.id !== rawId);
+  saveFastPostsCache(sortCommunityPosts([hydrated, ...withoutThis]));
+  emitHubSync('community_post', rawId);
 
   await upsertHubRow(
     encodeHubRow({
@@ -1245,7 +1323,7 @@ export async function saveSupabaseCommunityPost(
       author_uid: cleanPost.authorId || 'user',
       author_name: cleanPost.authorName,
       author_username: cleanPost.authorUsername,
-      author_photo: cleanPost.authorPhoto,
+      author_photo: cleanPhoto,
       views: cleanPost.commentsCount,
       likes: cleanPost.likesCount,
       liked_by: cleanPost.likedBy,
@@ -1255,10 +1333,10 @@ export async function saveSupabaseCommunityPost(
   );
 
   if (sendNotificationToAll) {
-    await sendSupabaseGlobalNotification(
+    sendSupabaseGlobalNotification(
       cleanPost.authorId,
       cleanPost.authorName,
-      cleanPost.authorPhoto,
+      cleanPhoto,
       'new_post',
       {
         postId: rawId,
@@ -1266,11 +1344,10 @@ export async function saveSupabaseCommunityPost(
         postTag: cleanPost.tag || 'General',
         targetUrl: `/community?postId=${rawId}`,
       }
-    );
+    ).catch(() => {});
   }
 
-  emitHubSync('community_post', rawId);
-  return hydratePostTimestamps(cleanPost);
+  return hydrated;
 }
 
 export async function updateSupabaseCommunityPost(
@@ -1279,11 +1356,8 @@ export async function updateSupabaseCommunityPost(
   patch: Record<string, any>
 ): Promise<any> {
   const rawId = String(postId).replace(/^post_/, '');
-  const existingRows = await queryHubRows(
-    `select=*&id=eq.${encodeURIComponent(`post_${rawId}`)}&limit=1`
-  );
-  const current =
-    existingRows.length > 0 ? decodeHubPayload(existingRows[0]) : basePost || { id: rawId };
+  const cachedMatch = getInstantCommunityPosts().find((p) => p.id === rawId);
+  const current = cachedMatch || basePost || { id: rawId };
   const merged = {
     ...current,
     ...patch,
@@ -1294,30 +1368,40 @@ export async function updateSupabaseCommunityPost(
 
 export async function deleteSupabaseCommunityPost(postId: string): Promise<void> {
   const rawId = String(postId).replace(/^post_/, '');
-  await deleteHubRow(`post_${rawId}`);
+  const currentList = getInstantCommunityPosts();
+  saveFastPostsCache(currentList.filter((p) => p.id !== rawId));
   emitHubSync('community_post', rawId);
+  await deleteHubRow(`post_${rawId}`);
 }
 
 export function subscribeSupabaseCommunityPosts(onUpdate: (posts: any[]) => void): () => void {
   let active = true;
 
-  const load = async () => {
+  // Instant 0ms render from memory / localStorage cache
+  const instant = getInstantCommunityPosts();
+  if (instant.length > 0) {
+    onUpdate(instant);
+  }
+
+  const load = async (force = false) => {
     if (!active) return;
-    const list = await fetchSupabaseCommunityPosts();
+    const list = await fetchSupabaseCommunityPosts(force);
     if (!active) return;
     onUpdate(list);
   };
 
-  load();
+  load(true);
   const interval = setInterval(() => {
     if (document.visibilityState === 'visible') {
-      load();
+      load(true);
     }
   }, 6000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'community_post') {
-      load();
+      if (postsMemoryCache && active) {
+        onUpdate(postsMemoryCache);
+      }
     }
   };
   window.addEventListener(HUB_EVENT_NAME, handleSync);
@@ -1330,13 +1414,62 @@ export function subscribeSupabaseCommunityPosts(onUpdate: (posts: any[]) => void
 }
 
 // ============================================================================
-// 7. COMMUNITY POST COMMENTS (`post_comment` in Supabase)
+// 7. COMMUNITY POST COMMENTS (`post_comment` in Supabase - 0ms Optimistic!)
 // ============================================================================
+
+function hydrateCommentItem(decoded: any, fallbackMs?: number): any {
+  const ms = decoded.createdAtMs || fallbackMs || Date.now();
+  const cId = decoded.id || String(decoded._rowId || '').replace(/^pcomment_/, '');
+  return {
+    ...decoded,
+    id: cId,
+    authorPhoto: sanitizePhotoUrl(decoded.authorPhoto),
+    createdAtMs: ms,
+    createdAt: {
+      toDate: () => new Date(ms),
+      toMillis: () => ms,
+    },
+  };
+}
+
+function getInstantPostComments(rawPostId: string): any[] | null {
+  if (commentsMemoryCache.has(rawPostId)) {
+    return commentsMemoryCache.get(rawPostId) || null;
+  }
+  try {
+    const raw = localStorage.getItem(`jee_fast_comments_${rawPostId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const hydrated = parsed.map((c) => hydrateCommentItem(c));
+        commentsMemoryCache.set(rawPostId, hydrated);
+        return hydrated;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function saveInstantPostComments(rawPostId: string, list: any[]) {
+  commentsMemoryCache.set(rawPostId, list);
+  try {
+    const serializable = list.slice(0, 100).map((c) => {
+      const copy = { ...c };
+      delete copy.createdAt;
+      return copy;
+    });
+    localStorage.setItem(`jee_fast_comments_${rawPostId}`, JSON.stringify(serializable));
+  } catch {
+    // ignore
+  }
+}
 
 export async function fetchSupabasePostComments(postId: string): Promise<any[]> {
   const rawPostId = String(postId).replace(/^post_/, '');
   const rows = await queryHubRows(
-    `select=*&video_type=eq.post_comment&chapter=eq.${encodeURIComponent(rawPostId)}&order=created_at.asc&limit=200`
+    `select=*&video_type=eq.post_comment&chapter=eq.${encodeURIComponent(rawPostId)}&order=created_at.asc&limit=150`
   );
 
   const commentsMap = new Map<string, any>();
@@ -1344,50 +1477,13 @@ export async function fetchSupabasePostComments(postId: string): Promise<any[]> 
     const decoded = decodeHubPayload(row);
     if (!decoded || decoded.isDeleted) continue;
     const ms = decoded.createdAtMs || new Date(row.created_at).getTime();
-    const cId = decoded.id || String(row.id).replace(/^pcomment_/, '');
-    commentsMap.set(cId, {
-      ...decoded,
-      id: cId,
-      createdAt: {
-        toDate: () => new Date(ms),
-        toMillis: () => ms,
-      },
-    });
+    const hydrated = hydrateCommentItem(decoded, ms);
+    commentsMap.set(hydrated.id, hydrated);
   }
 
-  // One-time fallback seed from Firebase comments for legacy posts
-  const seedKey = `seeded_comments_${rawPostId}`;
-  if (commentsMap.size === 0 && !firebaseSeededFlags.has(seedKey)) {
-    firebaseSeededFlags.add(seedKey);
-    try {
-      const q = query(collection(db, 'comments'), where('postId', '==', rawPostId));
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        const fbData = d.data();
-        const ms = fbData.createdAt?.toMillis
-          ? fbData.createdAt.toMillis()
-          : fbData.createdAt?.toDate
-          ? fbData.createdAt.toDate().getTime()
-          : Date.now();
-        const commentObj = {
-          ...fbData,
-          id: d.id,
-          postId: rawPostId,
-          createdAtMs: ms,
-        };
-        delete (commentObj as any).createdAt;
-        commentsMap.set(d.id, {
-          ...commentObj,
-          createdAt: { toDate: () => new Date(ms), toMillis: () => ms },
-        });
-        saveSupabasePostComment(commentObj).catch(() => {});
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return Array.from(commentsMap.values());
+  const list = Array.from(commentsMap.values());
+  saveInstantPostComments(rawPostId, list);
+  return list;
 }
 
 export async function saveSupabasePostComment(commentData: any): Promise<any> {
@@ -1396,17 +1492,28 @@ export async function saveSupabasePostComment(commentData: any): Promise<any> {
   ).replace(/^pcomment_/, '');
   const rawPostId = String(commentData.postId || '').replace(/^post_/, '');
   const createdAtMs = commentData.createdAtMs || Date.now();
+  const cleanPhoto = sanitizePhotoUrl(commentData.authorPhoto);
 
   const clean = {
     ...commentData,
     id: rawId,
     postId: rawPostId,
+    authorPhoto: cleanPhoto,
     createdAtMs,
     likesCount: Number(commentData.likesCount) || 0,
     likedBy: Array.isArray(commentData.likedBy) ? commentData.likedBy : [],
   };
   delete clean.createdAt;
   delete clean.updatedAt;
+
+  const hydrated = hydrateCommentItem(clean, createdAtMs);
+
+  // Instant 0ms optimistic update in memory + localStorage BEFORE network call!
+  const existing = getInstantPostComments(rawPostId) || [];
+  const filtered = existing.filter((c) => c.id !== rawId);
+  const nextList = clean.isDeleted ? filtered : [...filtered, hydrated];
+  saveInstantPostComments(rawPostId, nextList);
+  emitHubSync('post_comment', rawPostId);
 
   await upsertHubRow(
     encodeHubRow({
@@ -1418,7 +1525,7 @@ export async function saveSupabasePostComment(commentData: any): Promise<any> {
       chapter: rawPostId,
       author_uid: clean.authorId || 'user',
       author_name: clean.authorName || 'Student',
-      author_photo: clean.authorPhoto || '',
+      author_photo: cleanPhoto,
       likes: clean.likesCount,
       liked_by: clean.likedBy,
       payload: clean,
@@ -1426,20 +1533,37 @@ export async function saveSupabasePostComment(commentData: any): Promise<any> {
     })
   );
 
-  emitHubSync('post_comment', rawPostId);
-  return {
-    ...clean,
-    createdAt: {
-      toDate: () => new Date(createdAtMs),
-      toMillis: () => createdAtMs,
-    },
-  };
+  return hydrated;
 }
 
-export async function deleteSupabasePostComment(commentId: string): Promise<void> {
+export async function deleteSupabasePostComment(commentId: string, postId?: string): Promise<void> {
   const rawId = String(commentId).replace(/^pcomment_/, '');
+  if (postId) {
+    const rawPostId = String(postId).replace(/^post_/, '');
+    const existing = getInstantPostComments(rawPostId) || [];
+    saveInstantPostComments(
+      rawPostId,
+      existing.filter((c) => c.id !== rawId)
+    );
+    emitHubSync('post_comment', rawPostId);
+  }
   await deleteHubRow(`pcomment_${rawId}`);
   emitHubSync('post_comment', rawId);
+}
+
+function sortPostComments(list: any[], postAuthorId: string): any[] {
+  return [...list].sort((a: any, b: any) => {
+    if (a.isAdmin && !b.isAdmin) return -1;
+    if (!a.isAdmin && b.isAdmin) return 1;
+    if (a.authorId === postAuthorId && b.authorId !== postAuthorId) return -1;
+    if (a.authorId !== postAuthorId && b.authorId === postAuthorId) return 1;
+    const aVotes = (a.upvotes || 0) - (a.downvotes || 0);
+    const bVotes = (b.upvotes || 0) - (b.downvotes || 0);
+    if (aVotes !== bVotes) return bVotes - aVotes;
+    const aMs = a.createdAt?.toMillis ? a.createdAt.toMillis() : a.createdAtMs || 0;
+    const bMs = b.createdAt?.toMillis ? b.createdAt.toMillis() : b.createdAtMs || 0;
+    return aMs - bMs;
+  });
 }
 
 export function subscribeSupabasePostComments(
@@ -1450,25 +1574,17 @@ export function subscribeSupabasePostComments(
   let active = true;
   const rawPostId = String(postId).replace(/^post_/, '');
 
+  // Instant 0ms cache emit if we already opened this post earlier
+  const cached = getInstantPostComments(rawPostId);
+  if (cached) {
+    onUpdate(sortPostComments(cached, postAuthorId));
+  }
+
   const load = async () => {
     if (!active || !rawPostId) return;
     const list = await fetchSupabasePostComments(rawPostId);
     if (!active) return;
-
-    const sorted = list.sort((a: any, b: any) => {
-      if (a.isAdmin && !b.isAdmin) return -1;
-      if (!a.isAdmin && b.isAdmin) return 1;
-      if (a.authorId === postAuthorId && b.authorId !== postAuthorId) return -1;
-      if (a.authorId !== postAuthorId && b.authorId === postAuthorId) return 1;
-      const aVotes = (a.upvotes || 0) - (a.downvotes || 0);
-      const bVotes = (b.upvotes || 0) - (b.downvotes || 0);
-      if (aVotes !== bVotes) return bVotes - aVotes;
-      const aMs = a.createdAt?.toMillis ? a.createdAt.toMillis() : a.createdAtMs || 0;
-      const bMs = b.createdAt?.toMillis ? b.createdAt.toMillis() : b.createdAtMs || 0;
-      return aMs - bMs;
-    });
-
-    onUpdate(sorted);
+    onUpdate(sortPostComments(list, postAuthorId));
   };
 
   load();
@@ -1476,11 +1592,14 @@ export function subscribeSupabasePostComments(
     if (document.visibilityState === 'visible') {
       load();
     }
-  }, 3500);
+  }, 4000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'post_comment') {
-      load();
+      const latestMem = commentsMemoryCache.get(rawPostId);
+      if (latestMem && active) {
+        onUpdate(sortPostComments(latestMem, postAuthorId));
+      }
     }
   };
   window.addEventListener(HUB_EVENT_NAME, handleSync);

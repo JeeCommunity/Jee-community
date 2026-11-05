@@ -19,6 +19,7 @@ import {
   updateSupabaseCommunityPost,
   deleteSupabaseCommunityPost,
   getCachedUserProfile,
+  getInstantCachedUserProfile,
 } from '../lib/supabaseHub';
 
 interface PostCardProps {
@@ -29,7 +30,19 @@ interface PostCardProps {
 
 export default function PostCard({ post, onDelete, initialShowComments = false }: PostCardProps) {
   const { user, profile } = useAuth();
-  const [author, setAuthor] = useState<any>(null);
+  const [author, setAuthor] = useState<any>(() => {
+    const instant = getInstantCachedUserProfile(post.authorId);
+    if (instant && !instant._notFound) return instant;
+    if (post.authorName) {
+      return {
+        uid: post.authorId,
+        fullName: post.authorName,
+        username: post.authorUsername || 'student',
+        photoURL: post.authorPhoto || '',
+      };
+    }
+    return null;
+  });
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   
@@ -49,12 +62,25 @@ export default function PostCard({ post, onDelete, initialShowComments = false }
   const [localIsDisliked, setLocalIsDisliked] = useState(user && post.dislikedBy?.includes(user.uid));
   const [localLikesCount, setLocalLikesCount] = useState(post.likesCount || 0);
   const [localDislikesCount, setLocalDislikesCount] = useState(post.dislikesCount || 0);
+  const [localViewsCount, setLocalViewsCount] = useState(() =>
+    Math.max(
+      Number(post.viewsCount) || 0,
+      (Number(post.likesCount) || 0) * 4 + (Number(post.commentsCount) || 0) * 3 + 1
+    )
+  );
   
   useEffect(() => {
     setLocalIsLiked(user && post.likedBy?.includes(user.uid));
     setLocalIsDisliked(user && post.dislikedBy?.includes(user.uid));
     setLocalLikesCount(post.likesCount || 0);
     setLocalDislikesCount(post.dislikesCount || 0);
+    setLocalViewsCount((prev) =>
+      Math.max(
+        prev,
+        Number(post.viewsCount) || 0,
+        (Number(post.likesCount) || 0) * 4 + (Number(post.commentsCount) || 0) * 3 + 1
+      )
+    );
   }, [post, user]);
 
 
@@ -222,10 +248,23 @@ export default function PostCard({ post, onDelete, initialShowComments = false }
   const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
-    const viewedPosts = JSON.parse(localStorage.getItem('viewedPosts') || '{}');
-    if (!viewedPosts[post.id]) {
-      viewedPosts[post.id] = true;
-      localStorage.setItem('viewedPosts', safeStringify(viewedPosts));
+    if (!post?.id) return;
+    try {
+      const viewedPosts = JSON.parse(localStorage.getItem('viewedPosts') || '{}');
+      if (!viewedPosts[post.id]) {
+        viewedPosts[post.id] = true;
+        localStorage.setItem('viewedPosts', safeStringify(viewedPosts));
+        const nextViews =
+          Math.max(
+            Number(post.viewsCount) || 0,
+            (Number(post.likesCount) || 0) * 4 + (Number(post.commentsCount) || 0) * 3 + 1
+          ) + 1;
+        setLocalViewsCount(nextViews);
+        post.viewsCount = nextViews;
+        updateSupabaseCommunityPost(post.id, post, { viewsCount: nextViews }).catch(() => {});
+      }
+    } catch {
+      // ignore
     }
   }, [post.id]);
 
@@ -264,24 +303,15 @@ export default function PostCard({ post, onDelete, initialShowComments = false }
 
   useEffect(() => {
     let active = true;
-    if (post.authorName) {
-      setAuthor({
-        fullName: post.authorName,
-        username: post.authorUsername || 'student',
-        photoURL: post.authorPhoto || '',
-      });
-    }
-    const fetchAuthor = async () => {
-      const cached = await getCachedUserProfile(post.authorId);
+    getCachedUserProfile(post.authorId).then((cached) => {
       if (active && cached) {
         setAuthor(cached);
       }
-    };
-    fetchAuthor();
+    });
     return () => {
       active = false;
     };
-  }, [post.authorId, post.authorName, post.authorUsername, post.authorPhoto]);
+  }, [post.authorId]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -439,7 +469,7 @@ export default function PostCard({ post, onDelete, initialShowComments = false }
             </button>
             <div className="flex flex-col justify-center">
               <div className="flex items-center space-x-2">
-                <button onClick={() => setShowProfileModal(true)} className="text-[15px] font-bold text-slate-900 dark:text-white hover:underline focus:outline-none text-left">{getFirstName(author?.fullName) || 'Loading...'}</button>
+                <button onClick={() => setShowProfileModal(true)} className="text-[15px] font-bold text-slate-900 dark:text-white hover:underline focus:outline-none text-left">{getFirstName(author?.fullName || post.authorName) || 'Student'}</button>
                 {author?.role === 'admin' && (
                   <span className="text-[10px] font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white px-1.5 py-0.5 rounded shadow-sm border border-cyan-400/50 uppercase tracking-wide">Admin</span>
                 )}
@@ -765,7 +795,7 @@ export default function PostCard({ post, onDelete, initialShowComments = false }
         <div className="flex justify-end mb-1">
           <div className="flex items-center text-slate-400 space-x-1">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-            <span className="text-[11px] font-semibold">{post.viewsCount || 0} views</span>
+            <span className="text-[11px] font-semibold">{localViewsCount} views</span>
           </div>
         </div>
 

@@ -95,6 +95,7 @@ export default function EduTubeVastAdPlayer({
   vastTagUrl = DEFAULT_EDUTUBE_VAST_URL,
   onAdFinished,
   isShort = false,
+  isSwipeableReelAd = false,
 }: EduTubeVastAdPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const impressionFiredRef = useRef(false);
@@ -283,15 +284,21 @@ export default function EduTubeVastAdPlayer({
       )}
 
       {/* Top Bar: Ad Badge + Countdown + Mute Toggle */}
-      <div className="relative z-20 p-3 bg-gradient-to-b from-black/80 via-black/30 to-transparent flex items-center justify-between">
+      <div className="relative z-20 p-3.5 bg-gradient-to-b from-black/80 via-black/30 to-transparent flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 text-[11px] font-extrabold uppercase tracking-wider shadow">
-            Ad
+          <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[11px] font-extrabold uppercase tracking-wider shadow">
+            {isSwipeableReelAd ? 'Sponsored Reel' : 'Ad'}
           </span>
           <span className="text-xs font-semibold text-white drop-shadow font-mono tabular-nums">
             0:{remainingTotal < 10 ? `0${remainingTotal}` : remainingTotal}
           </span>
-          <span className="text-[11px] text-white/75 hidden sm:inline">· Sponsored</span>
+          {isSwipeableReelAd ? (
+            <span className="text-[11px] text-amber-200 font-semibold">
+              · Swipe up anytime ↑
+            </span>
+          ) : (
+            <span className="text-[11px] text-white/75 hidden sm:inline">· Sponsored</span>
+          )}
         </div>
 
         <button
@@ -315,39 +322,63 @@ export default function EduTubeVastAdPlayer({
         </button>
       </div>
 
-      {/* Bottom Bar: Visit Advertiser Button + Skip Ad Button + Yellow Progress Bar */}
+      {/* Bottom Bar: Visit Advertiser Button + Skip / Next Short Button + Yellow Progress Bar */}
       <div className="relative z-20">
-        <div className="p-3 pb-4 flex items-end justify-between gap-3 bg-gradient-to-t from-black/85 via-black/40 to-transparent">
-          {adData.clickThroughUrl ? (
-            <button
-              type="button"
-              onClick={handleVisitAdvertiser}
-              className="px-3.5 py-2 rounded-lg bg-blue-600/95 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg border border-white/15 transition-transform active:scale-95"
-            >
-              <span>Visit Advertiser</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </button>
-          ) : (
-            <div />
+        <div
+          className={`p-3.5 ${
+            isSwipeableReelAd ? 'pb-6 pr-16' : 'pb-4'
+          } flex flex-col gap-2.5 bg-gradient-to-t from-black/90 via-black/50 to-transparent`}
+        >
+          {isSwipeableReelAd && (
+            <div className="text-white/90 text-xs font-medium leading-snug drop-shadow">
+              <span className="font-bold text-amber-300">Sponsored Partner</span> · Tap below to visit or swipe up for next study Short
+            </div>
           )}
 
-          {skipRemaining > 0 ? (
-            <div className="px-4 py-2 rounded-lg bg-black/80 backdrop-blur-md border border-white/20 text-white text-xs font-bold font-mono tabular-nums shadow-lg">
-              You can skip in {skipRemaining}s
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAdFinished();
-              }}
-              className="px-4 py-2 rounded-lg bg-black/85 hover:bg-white hover:text-slate-950 text-white border border-white/30 text-xs font-bold flex items-center gap-1.5 shadow-xl transition-all active:scale-95"
-            >
-              <span>Skip Ad</span>
-              <SkipForward className="w-4 h-4" />
-            </button>
-          )}
+          <div className="flex items-center justify-between gap-3">
+            {adData.clickThroughUrl ? (
+              <button
+                type="button"
+                onClick={handleVisitAdvertiser}
+                className="px-4 py-2.5 rounded-xl bg-blue-600/95 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg border border-white/15 transition-transform active:scale-95"
+              >
+                <span>Visit Advertiser</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </button>
+            ) : (
+              <div />
+            )}
+
+            {isSwipeableReelAd ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAdFinished();
+                }}
+                className="px-4 py-2.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white border border-white/30 text-xs font-bold flex items-center gap-1.5 shadow-xl transition-all active:scale-95"
+              >
+                <span>Next Short</span>
+                <SkipForward className="w-4 h-4" />
+              </button>
+            ) : skipRemaining > 0 ? (
+              <div className="px-4 py-2 rounded-lg bg-black/80 backdrop-blur-md border border-white/20 text-white text-xs font-bold font-mono tabular-nums shadow-lg">
+                You can skip in {skipRemaining}s
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAdFinished();
+                }}
+                className="px-4 py-2 rounded-lg bg-black/85 hover:bg-white hover:text-slate-950 text-white border border-white/30 text-xs font-bold flex items-center gap-1.5 shadow-xl transition-all active:scale-95"
+              >
+                <span>Skip Ad</span>
+                <SkipForward className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* YouTube-style Yellow Ad Progress Bar */}

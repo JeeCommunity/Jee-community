@@ -25,6 +25,15 @@ export const resolveSessionState = (data: any, todayDate: string) => {
   }
 
   if (data.dailyDate !== todayDate) {
+    // Save yesterday's final time and goals into weeklyData calendar before starting the new day at 12:00 AM
+    if (data.dailyDate) {
+      const existingYday = weeklyData[data.dailyDate] || {};
+      weeklyData[data.dailyDate] = {
+        accumulatedTime: Math.max(existingYday.accumulatedTime || 0, baseTime),
+        goals: currentGoals.length > 0 ? currentGoals : existingYday.goals || [],
+      };
+    }
+
     if (isStudying && data.startTime) {
       const now = new Date();
       

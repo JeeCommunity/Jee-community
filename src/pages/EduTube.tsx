@@ -47,6 +47,7 @@ import {
   EduTubeVideo,
   EduTubeChannel,
   VideoFormat,
+  getInstantEduTubeCache,
   fetchEduTubeData,
   fetchSingleEduTubeVideo,
   publishEduTubeVideo,
@@ -100,9 +101,10 @@ export default function EduTube() {
     profile?.role === 'admin' ||
     profile?.role === 'community_manager';
 
-  const [videos, setVideos] = useState<EduTubeVideo[]>([]);
-  const [channels, setChannels] = useState<EduTubeChannel[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialCache = useMemo(() => getInstantEduTubeCache(), []);
+  const [videos, setVideos] = useState<EduTubeVideo[]>(() => initialCache.videos);
+  const [channels, setChannels] = useState<EduTubeChannel[]>(() => initialCache.channels);
+  const [loading, setLoading] = useState(() => initialCache.videos.length === 0);
 
   // Navigation & Filtering state
   const [activeTab, setActiveTab] = useState<FeedTab>('home');
@@ -132,6 +134,9 @@ export default function EduTube() {
   const [isShortPaused, setIsShortPaused] = useState<boolean>(false);
   const [isShortCommentsOpen, setIsShortCommentsOpen] = useState<boolean>(false);
   const [shortFitMode, setShortFitMode] = useState<'cover' | 'contain'>('cover');
+  const [isShowingShortReelAd, setIsShowingShortReelAd] = useState<boolean>(false);
+  const [shortReelAdKey, setShortReelAdKey] = useState<number>(0);
+  const shortsWatchedSinceAdRef = useRef<number>(0);
   const touchStartYRef = useRef<number | null>(null);
 
   // Upload Video Studio Modal state
@@ -181,7 +186,7 @@ export default function EduTube() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
 
   const loadData = async () => {
-    setLoading(true);
+    if (videos.length === 0) setLoading(true);
     try {
       const res = await fetchEduTubeData();
       setVideos(res.videos);
@@ -562,7 +567,12 @@ export default function EduTube() {
     setIsShortPaused(false);
     setShowMp4MidRollAd(false);
     mp4MidRollTriggeredRef.current = false;
-    setIsPlayingVastAd(video.video_type !== 'live');
+    setIsShowingShortReelAd(false);
+    // Pre-roll ads only on Long videos; Shorts use swipeable Reels Ad Card every 5 Shorts
+    setIsPlayingVastAd(video.video_type === 'long');
+    if (video.video_type === 'short') {
+      shortsWatchedSinceAdRef.current += 1;
+    }
     setActiveVideoId(video.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
@@ -570,13 +580,33 @@ export default function EduTube() {
     setVideos((prev) =>
       prev.map((item) => (item.id === video.id ? { ...item, views: nextViews } : item))
     );
-    await updateEduTubeVideoRecord(video.id, { views: nextViews });
+    updateEduTubeVideoRecord(video.id, { views: nextViews }).catch(() => {});
   };
 
   const handleNavigateShort = (direction: 'prev' | 'next') => {
     if (!activeVideo || shortsPlaylist.length <= 1) return;
     const idx = shortsPlaylist.findIndex((v) => v.id === activeVideo.id);
     if (idx === -1) return;
+
+    // If user is currently on the Swipeable Sponsored Reel Ad Card, swiping moves immediately to the Short!
+    if (isShowingShortReelAd) {
+      setIsShowingShortReelAd(false);
+      if (direction === 'prev') {
+        return;
+      }
+      const nextIdxAfterAd = (idx + 1) % shortsPlaylist.length;
+      handleSelectVideoToWatch(shortsPlaylist[nextIdxAfterAd]);
+      return;
+    }
+
+    // Show a Swipeable Sponsored Reel Ad Card after every 5 Shorts watched
+    if (direction === 'next' && shortsWatchedSinceAdRef.current >= 5) {
+      shortsWatchedSinceAdRef.current = 0;
+      setShortReelAdKey((prev) => prev + 1);
+      setIsShowingShortReelAd(true);
+      return;
+    }
+
     const nextIdx =
       direction === 'next'
         ? (idx + 1) % shortsPlaylist.length
@@ -662,7 +692,8 @@ export default function EduTube() {
         item.id === activeVideo.id ? { ...item, comments: nextComments } : item
       )
     );
-    await updateEduTubeVideoRecord(activeVideo.id, { comments: nextComments });
+    toast.success('Comment posted');
+    updateEduTubeVideoRecord(activeVideo.id, { comments: nextComments }).catch(() => {});
     if (activeVideo.author_uid !== user.uid) {
       createNotification({
         recipientId: activeVideo.author_uid,
@@ -676,7 +707,6 @@ export default function EduTube() {
         targetUrl: '/edutube',
       });
     }
-    toast.success('Comment posted');
   };
 
   const handleDeleteComment = async (commentId: string) => {
@@ -1253,12 +1283,13 @@ export default function EduTube() {
                   }}
                   className="relative w-full max-w-[390px] sm:max-w-[410px] h-[77vh] min-h-[520px] max-h-[780px] aspect-[9/16] rounded-3xl overflow-hidden bg-black shadow-2xl border border-slate-800 select-none"
                 >
-                  {/* Video Surface (Plays VAST 3.0 Pre-Roll Ad first, then Short) */}
-                  {isPlayingVastAd ? (
+                  {/* Video Surface (Plays Short immediately; every 5 Shorts shows a Swipeable Sponsored Reel Ad) */}
+                  {isShowingShortReelAd ? (
                     <EduTubeVastAdPlayer
-                      key={`vast_short_${activeVideo.id}`}
+                      key={`vast_reel_ad_${shortReelAdKey}`}
                       isShort={true}
-                      onAdFinished={() => setIsPlayingVastAd(false)}
+                      isSwipeableReelAd={true}
+                      onAdFinished={() => handleNavigateShort('next')}
                     />
                   ) : embed.type === 'youtube' && embed.youtubeId ? (
                     <EduTubeYouTubePlayer
@@ -1303,7 +1334,7 @@ export default function EduTube() {
                   )}
 
                   {/* Center Play Indicator when Paused */}
-                  {isShortPaused && embed.type === 'video' && !isBufferingChunks && (
+                  {!isShowingShortReelAd && isShortPaused && embed.type === 'video' && !isBufferingChunks && (
                     <div
                       onClick={handleToggleShortPlayPause}
                       className="absolute inset-0 flex items-center justify-center bg-black/20 cursor-pointer z-10"
@@ -1314,53 +1345,55 @@ export default function EduTube() {
                     </div>
                   )}
 
-                  {/* Top Overlay Bar: Shorts Badge, Fit/Fill Toggle & Mute/Unmute */}
-                  <div className="absolute top-0 inset-x-0 p-3.5 bg-gradient-to-b from-black/70 via-black/25 to-transparent flex items-center justify-between z-20 pointer-events-none">
-                    <div className="flex items-center gap-2 pointer-events-auto">
-                      <span className="px-2.5 py-1 rounded-full bg-black/55 backdrop-blur-md border border-white/15 text-white text-xs font-bold flex items-center gap-1.5">
-                        <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                        <span>Shorts</span>
-                        {shortsPlaylist.length > 1 && (
-                          <span className="text-[10px] text-white/70 font-mono">
-                            {currentShortIdx + 1}/{shortsPlaylist.length}
-                          </span>
+                  {/* Top Overlay Bar: Shorts Badge, Fit/Fill Toggle & Mute/Unmute (hidden during Sponsored Reel Ad) */}
+                  {!isShowingShortReelAd && (
+                    <div className="absolute top-0 inset-x-0 p-3.5 bg-gradient-to-b from-black/70 via-black/25 to-transparent flex items-center justify-between z-20 pointer-events-none">
+                      <div className="flex items-center gap-2 pointer-events-auto">
+                        <span className="px-2.5 py-1 rounded-full bg-black/55 backdrop-blur-md border border-white/15 text-white text-xs font-bold flex items-center gap-1.5">
+                          <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                          <span>Shorts</span>
+                          {shortsPlaylist.length > 1 && (
+                            <span className="text-[10px] text-white/70 font-mono">
+                              {currentShortIdx + 1}/{shortsPlaylist.length}
+                            </span>
+                          )}
+                        </span>
+                        {embed.type === 'video' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShortFitMode((prev) => (prev === 'cover' ? 'contain' : 'cover'));
+                            }}
+                            className="px-2.5 py-1 rounded-full bg-black/55 backdrop-blur-md border border-white/15 text-white/90 hover:text-white text-[11px] font-semibold"
+                            title="Toggle Fill vs Fit"
+                          >
+                            {shortFitMode === 'cover' ? 'Full Screen' : 'Fit'}
+                          </button>
                         )}
-                      </span>
-                      {embed.type === 'video' && (
+                      </div>
+
+                      {(embed.type === 'video' || embed.type === 'youtube') && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setShortFitMode((prev) => (prev === 'cover' ? 'contain' : 'cover'));
+                            setIsShortMuted((prev) => !prev);
                           }}
-                          className="px-2.5 py-1 rounded-full bg-black/55 backdrop-blur-md border border-white/15 text-white/90 hover:text-white text-[11px] font-semibold"
-                          title="Toggle Fill vs Fit"
+                          className="w-9 h-9 rounded-full bg-black/55 backdrop-blur-md border border-white/15 text-white flex items-center justify-center pointer-events-auto hover:bg-black/75 transition-colors"
+                          title={isShortMuted ? 'Unmute' : 'Mute'}
                         >
-                          {shortFitMode === 'cover' ? 'Full Screen' : 'Fit'}
+                          {isShortMuted ? (
+                            <VolumeX className="w-4 h-4 text-red-400" />
+                          ) : (
+                            <Volume2 className="w-4 h-4" />
+                          )}
                         </button>
                       )}
                     </div>
-
-                    {(embed.type === 'video' || embed.type === 'youtube') && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsShortMuted((prev) => !prev);
-                        }}
-                        className="w-9 h-9 rounded-full bg-black/55 backdrop-blur-md border border-white/15 text-white flex items-center justify-center pointer-events-auto hover:bg-black/75 transition-colors"
-                        title={isShortMuted ? 'Unmute' : 'Mute'}
-                      >
-                        {isShortMuted ? (
-                          <VolumeX className="w-4 h-4 text-red-400" />
-                        ) : (
-                          <Volume2 className="w-4 h-4" />
-                        )}
-                      </button>
-                    )}
-                  </div>
+                  )}
 
                   {/* Right-Side Vertical Floating Action Bar (YouTube Shorts / Instagram Reels Style) */}
-                  <div className="absolute right-3 bottom-24 flex flex-col items-center gap-4 z-20">
-                    {/* Prev / Next Short Quick Buttons */}
+                  <div className="absolute right-3 bottom-24 flex flex-col items-center gap-4 z-50">
+                    {/* Prev / Next Short Quick Buttons (Always active even on Sponsored Reel Ad!) */}
                     {shortsPlaylist.length > 1 && (
                       <div className="flex flex-col items-center gap-1.5 mb-1">
                         <button
@@ -1386,167 +1419,173 @@ export default function EduTube() {
                       </div>
                     )}
 
-                    {/* Like Button */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleLike(activeVideo);
-                      }}
-                      className="flex flex-col items-center gap-1 group"
-                    >
-                      <div
-                        className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-md border transition-transform active:scale-90 ${
-                          isLiked
-                            ? 'bg-red-600 text-white border-red-500 shadow-lg shadow-red-600/40'
-                            : 'bg-black/55 text-white border-white/15 hover:bg-black/75'
-                        }`}
-                      >
-                        <ThumbsUp className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
-                      </div>
-                      <span className="text-[11px] font-bold text-white drop-shadow font-mono tabular-nums">
-                        {activeVideo.likes}
-                      </span>
-                    </button>
-
-                    {/* Comment Button */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsShortCommentsOpen(true);
-                      }}
-                      className="flex flex-col items-center gap-1"
-                    >
-                      <div className="w-11 h-11 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md border border-white/15 text-white flex items-center justify-center transition-transform active:scale-90">
-                        <MessageSquare className="w-5 h-5" />
-                      </div>
-                      <span className="text-[11px] font-bold text-white drop-shadow font-mono tabular-nums">
-                        {activeVideo.comments?.length || 0}
-                      </span>
-                    </button>
-
-                    {/* Save Button */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleSave(activeVideo.id);
-                      }}
-                      className="flex flex-col items-center gap-1"
-                    >
-                      <div
-                        className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-md border transition-transform active:scale-90 ${
-                          isSaved
-                            ? 'bg-amber-500 text-white border-amber-400'
-                            : 'bg-black/55 text-white border-white/15 hover:bg-black/75'
-                        }`}
-                      >
-                        <Bookmark className={`w-5 h-5 ${isSaved ? 'fill-current' : ''}`} />
-                      </div>
-                      <span className="text-[11px] font-semibold text-white drop-shadow">
-                        {isSaved ? 'Saved' : 'Save'}
-                      </span>
-                    </button>
-
-                    {/* Share Button */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(window.location.href);
-                        toast.success('Short link copied!');
-                      }}
-                      className="flex flex-col items-center gap-1"
-                    >
-                      <div className="w-11 h-11 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md border border-white/15 text-white flex items-center justify-center transition-transform active:scale-90">
-                        <Share2 className="w-5 h-5" />
-                      </div>
-                      <span className="text-[11px] font-semibold text-white drop-shadow">
-                        Share
-                      </span>
-                    </button>
-
-                    {/* Delete Button (Owner or Admin) */}
-                    {(user?.uid === activeVideo.author_uid || isAdmin) && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteVideo(activeVideo);
-                        }}
-                        className="flex flex-col items-center gap-1"
-                        title="Delete Short"
-                      >
-                        <div className="w-10 h-10 rounded-full bg-red-600/80 hover:bg-red-600 backdrop-blur-md border border-red-400/40 text-white flex items-center justify-center">
-                          <Trash2 className="w-4 h-4" />
-                        </div>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Bottom Info Overlay: Creator Avatar + @Handle + Subscribe Button + Title + #Hashtags */}
-                  <div className="absolute bottom-0 inset-x-0 p-4 pr-16 bg-gradient-to-t from-black/90 via-black/55 to-transparent z-20 pointer-events-none">
-                    <div className="flex items-center gap-2.5 pointer-events-auto">
-                      <div
-                        onClick={() => handleOpenChannelPage(videoChannel.uid)}
-                        className="flex items-center gap-2.5 cursor-pointer min-w-0"
-                      >
-                        {videoChannel.avatar_url ? (
-                          <img
-                            src={videoChannel.avatar_url}
-                            alt={videoChannel.name}
-                            referrerPolicy="no-referrer"
-                            className="w-10 h-10 rounded-full object-cover border-2 border-white/80 shrink-0"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-red-600 text-white font-bold text-sm flex items-center justify-center border-2 border-white/80 shrink-0">
-                            {videoChannel.name[0]?.toUpperCase() || 'C'}
-                          </div>
-                        )}
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1 text-white font-bold text-sm truncate drop-shadow">
-                            <span className="truncate">{videoChannel.name}</span>
-                            {isOfficialChannel(videoChannel) && (
-                              <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
-                            )}
-                          </div>
-                          <div className="text-[11px] text-white/80 font-mono truncate">
-                            @{videoChannel.handle}
-                          </div>
-                        </div>
-                      </div>
-
-                      {!isOwnChannel && (
+                    {!isShowingShortReelAd && (
+                      <>
+                        {/* Like Button */}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleToggleSubscribe(videoChannel, e);
+                            handleToggleLike(activeVideo);
                           }}
-                          className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors shrink-0 ${
-                            isSubscribed
-                              ? 'bg-white/20 backdrop-blur-md text-white border border-white/30'
-                              : 'bg-red-600 hover:bg-red-700 text-white shadow-md'
-                          }`}
+                          className="flex flex-col items-center gap-1 group"
                         >
-                          {isSubscribed ? 'Subscribed' : 'Subscribe'}
-                        </button>
-                      )}
-                    </div>
-
-                    <h2 className="mt-2.5 text-sm font-bold text-white leading-snug line-clamp-2 drop-shadow pointer-events-auto">
-                      {activeVideo.title}
-                    </h2>
-
-                    {(activeVideo.tags || []).length > 0 && (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pointer-events-auto">
-                        {activeVideo.tags.slice(0, 4).map((tag) => (
-                          <button
-                            key={tag}
-                            onClick={(e) => handleClickHashtag(tag, e)}
-                            className="text-xs font-semibold text-blue-300 hover:text-white hover:underline drop-shadow"
+                          <div
+                            className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-md border transition-transform active:scale-90 ${
+                              isLiked
+                                ? 'bg-red-600 text-white border-red-500 shadow-lg shadow-red-600/40'
+                                : 'bg-black/55 text-white border-white/15 hover:bg-black/75'
+                            }`}
                           >
-                            {tag}
+                            <ThumbsUp className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
+                          </div>
+                          <span className="text-[11px] font-bold text-white drop-shadow font-mono tabular-nums">
+                            {activeVideo.likes}
+                          </span>
+                        </button>
+
+                        {/* Comment Button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsShortCommentsOpen(true);
+                          }}
+                          className="flex flex-col items-center gap-1"
+                        >
+                          <div className="w-11 h-11 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md border border-white/15 text-white flex items-center justify-center transition-transform active:scale-90">
+                            <MessageSquare className="w-5 h-5" />
+                          </div>
+                          <span className="text-[11px] font-bold text-white drop-shadow font-mono tabular-nums">
+                            {activeVideo.comments?.length || 0}
+                          </span>
+                        </button>
+
+                        {/* Save Button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleSave(activeVideo.id);
+                          }}
+                          className="flex flex-col items-center gap-1"
+                        >
+                          <div
+                            className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-md border transition-transform active:scale-90 ${
+                              isSaved
+                                ? 'bg-amber-500 text-white border-amber-400'
+                                : 'bg-black/55 text-white border-white/15 hover:bg-black/75'
+                            }`}
+                          >
+                            <Bookmark className={`w-5 h-5 ${isSaved ? 'fill-current' : ''}`} />
+                          </div>
+                          <span className="text-[11px] font-semibold text-white drop-shadow">
+                            {isSaved ? 'Saved' : 'Save'}
+                          </span>
+                        </button>
+
+                        {/* Share Button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(window.location.href);
+                            toast.success('Short link copied!');
+                          }}
+                          className="flex flex-col items-center gap-1"
+                        >
+                          <div className="w-11 h-11 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md border border-white/15 text-white flex items-center justify-center transition-transform active:scale-90">
+                            <Share2 className="w-5 h-5" />
+                          </div>
+                          <span className="text-[11px] font-semibold text-white drop-shadow">
+                            Share
+                          </span>
+                        </button>
+
+                        {/* Delete Button (Owner or Admin) */}
+                        {(user?.uid === activeVideo.author_uid || isAdmin) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteVideo(activeVideo);
+                            }}
+                            className="flex flex-col items-center gap-1"
+                            title="Delete Short"
+                          >
+                            <div className="w-10 h-10 rounded-full bg-red-600/80 hover:bg-red-600 backdrop-blur-md border border-red-400/40 text-white flex items-center justify-center">
+                              <Trash2 className="w-4 h-4" />
+                            </div>
                           </button>
-                        ))}
-                      </div>
+                        )}
+                      </>
                     )}
                   </div>
+
+                  {/* Bottom Info Overlay: Creator Avatar + @Handle + Subscribe Button + Title + #Hashtags (hidden during Sponsored Reel Ad) */}
+                  {!isShowingShortReelAd && (
+                    <div className="absolute bottom-0 inset-x-0 p-4 pr-16 bg-gradient-to-t from-black/90 via-black/55 to-transparent z-20 pointer-events-none">
+                      <div className="flex items-center gap-2.5 pointer-events-auto">
+                        <div
+                          onClick={() => handleOpenChannelPage(videoChannel.uid)}
+                          className="flex items-center gap-2.5 cursor-pointer min-w-0"
+                        >
+                          {videoChannel.avatar_url ? (
+                            <img
+                              src={videoChannel.avatar_url}
+                              alt={videoChannel.name}
+                              referrerPolicy="no-referrer"
+                              className="w-10 h-10 rounded-full object-cover border-2 border-white/80 shrink-0"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-red-600 text-white font-bold text-sm flex items-center justify-center border-2 border-white/80 shrink-0">
+                              {videoChannel.name[0]?.toUpperCase() || 'C'}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1 text-white font-bold text-sm truncate drop-shadow">
+                              <span className="truncate">{videoChannel.name}</span>
+                              {isOfficialChannel(videoChannel) && (
+                                <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
+                              )}
+                            </div>
+                            <div className="text-[11px] text-white/80 font-mono truncate">
+                              @{videoChannel.handle}
+                            </div>
+                          </div>
+                        </div>
+
+                        {!isOwnChannel && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleSubscribe(videoChannel, e);
+                            }}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors shrink-0 ${
+                              isSubscribed
+                                ? 'bg-white/20 backdrop-blur-md text-white border border-white/30'
+                                : 'bg-red-600 hover:bg-red-700 text-white shadow-md'
+                            }`}
+                          >
+                            {isSubscribed ? 'Subscribed' : 'Subscribe'}
+                          </button>
+                        )}
+                      </div>
+
+                      <h2 className="mt-2.5 text-sm font-bold text-white leading-snug line-clamp-2 drop-shadow pointer-events-auto">
+                        {activeVideo.title}
+                      </h2>
+
+                      {(activeVideo.tags || []).length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pointer-events-auto">
+                          {activeVideo.tags.slice(0, 4).map((tag) => (
+                            <button
+                              key={tag}
+                              onClick={(e) => handleClickHashtag(tag, e)}
+                              className="text-xs font-semibold text-blue-300 hover:text-white hover:underline drop-shadow"
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Slide-Up Comments Drawer Inside the Short Player */}
                   {isShortCommentsOpen && (

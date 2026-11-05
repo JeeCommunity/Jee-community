@@ -605,6 +605,22 @@ function mergeAndSynthesizeChannels(
 }
 
 /**
+ * Returns locally cached EduTube videos and channels synchronously in 0ms for instant page load.
+ */
+export function getInstantEduTubeCache(): {
+  videos: EduTubeVideo[];
+  channels: EduTubeChannel[];
+} {
+  const deletedIds = getDeletedIds();
+  const localVids = getLocalVideos().filter((v) => !deletedIds.includes(v.id));
+  const localChans = mergeAndSynthesizeChannels(getLocalChannels(), localVids);
+  return {
+    videos: localVids,
+    channels: localChans,
+  };
+}
+
+/**
  * Fetches both Videos and Creator Channels from Supabase (0 Firebase Reads).
  */
 export async function fetchEduTubeData(): Promise<{

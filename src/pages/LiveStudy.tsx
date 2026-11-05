@@ -55,6 +55,7 @@ import { resolveSessionState, getWeekMonday } from "../lib/sessionUtils";
 import StudyGroups from "../components/StudyGroups";
 import PrivateStudyGroups from "../components/PrivateStudyGroups";
 import UserProfileModal from "../components/UserProfileModal";
+import JeeCountdownBanner from "../components/JeeCountdownBanner";
 import toast from "react-hot-toast";
 
 interface Goal {
@@ -215,19 +216,19 @@ export default function LiveStudy() {
       }
       checkInTimer = setInterval(() => {
         const now = Date.now();
-        
-        // Check midnight reset
-        const currentLocalDay = new Date().toDateString();
-        if (mySession.dailyDate && new Date(now).toDateString() !== new Date(mySession.startTime || now).toDateString()) {
-           handleStop();
-           return;
+        const todayDate = getLocalDate();
+
+        // Check midnight reset (12:00 AM new day start -> saves time & goals to calendar)
+        if (mySession.dailyDate && mySession.dailyDate !== todayDate) {
+          handleStop();
+          return;
         }
 
         // Auto-stop if slot reaches 3 hours (10800 seconds)
         const timeStudiedInSlot = Math.floor((now - (mySession.startTime || now)) / 1000);
         if (timeStudiedInSlot >= 3 * 3600) {
-           handleStop();
-           return;
+          handleStop();
+          return;
         }
 
         if (!showCheckIn) {
@@ -237,7 +238,7 @@ export default function LiveStudy() {
             setCheckInCountdown(60);
           }
         }
-      }, 5000); // Check every 5 seconds
+      }, 5000);
     } else {
       setShowCheckIn(false);
     }
@@ -571,13 +572,13 @@ export default function LiveStudy() {
   const handleStart = async (goalId?: string) => {
     if (!user || !profile) return;
 
-    const existing = await getSupabaseStudySession(user.uid);
+    const existing = (await getSupabaseStudySession(user.uid)) || studySessionRef.current || mySession;
     const todayDate = getLocalDate();
 
     if (existing) {
       const { baseTime } = resolveSessionState(existing, todayDate);
       if (baseTime >= 18 * 3600) {
-        alert("You have reached the maximum study limit of 18 hours for today! Take a break and come back tomorrow.");
+        toast.error("You have reached the maximum study limit of 18 hours for today!");
         return;
       }
     }
@@ -633,7 +634,9 @@ export default function LiveStudy() {
     setShowCheckIn(false);
     const targetUid = typeof uidToStop === "string" ? uidToStop : user?.uid;
     if (!targetUid) return;
-    const data = await getSupabaseStudySession(targetUid);
+    const data =
+      (await getSupabaseStudySession(targetUid)) ||
+      (targetUid === user?.uid ? studySessionRef.current || mySession : null);
     if (!data) return;
 
     const todayDate = getLocalDate();
@@ -679,7 +682,7 @@ export default function LiveStudy() {
 
   const clearGoals = async () => {
     if (!user) return;
-    const sData = await getSupabaseStudySession(user.uid);
+    const sData = (await getSupabaseStudySession(user.uid)) || studySessionRef.current || mySession;
     if (!sData) return;
     const todayDate = getLocalDate();
 
@@ -715,7 +718,8 @@ export default function LiveStudy() {
       status: "pending",
       createdAt: Date.now(),
     };
-    const sData = await getSupabaseStudySession(user.uid);
+    setGoalInput("");
+    const sData = (await getSupabaseStudySession(user.uid)) || studySessionRef.current || mySession;
     const todayDate = getLocalDate();
 
     if (!sData) {
@@ -759,7 +763,6 @@ export default function LiveStudy() {
         user.uid
       );
     }
-    setGoalInput("");
   };
 
   const updateGoalStatus = async (
@@ -767,7 +770,7 @@ export default function LiveStudy() {
     status: "pending" | "completed" | "failed"
   ) => {
     if (!user) return;
-    const sData = await getSupabaseStudySession(user.uid);
+    const sData = (await getSupabaseStudySession(user.uid)) || studySessionRef.current || mySession;
     if (!sData) return;
 
     const todayDate = getLocalDate();
@@ -805,7 +808,7 @@ export default function LiveStudy() {
 
   const removeGoal = async (goalId: string) => {
     if (!user) return;
-    const sData = await getSupabaseStudySession(user.uid);
+    const sData = (await getSupabaseStudySession(user.uid)) || studySessionRef.current || mySession;
     if (!sData) return;
 
     const todayDate = getLocalDate();
@@ -925,6 +928,7 @@ export default function LiveStudy() {
 
   return (
     <div className="w-full max-w-lg mx-auto md:max-w-4xl space-y-4 pb-20">
+      <JeeCountdownBanner compact />
       
       {/* Main Banner */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-[20px] p-1 text-white shadow-lg relative overflow-hidden mb-6">

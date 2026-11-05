@@ -31,6 +31,7 @@ import {
   saveSupabasePostComment,
   updateSupabaseCommunityPost,
   getCachedUserProfile,
+  getInstantCachedUserProfile,
 } from '../lib/supabaseHub';
 
 interface Comment {
@@ -85,30 +86,50 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!newComment.trim() && !imageFile) || !user || isSubmitting) return;
+    const rawText = newComment.trim();
+    if ((!rawText && !imageFile) || !user || isSubmitting) return;
 
-    setIsSubmitting(true);
+    const currentReplyingTo = replyingTo;
+    const currentSendAsChulbul = sendAsChulbul;
+    const currentImageFile = imageFile;
+
+    // Clear text input immediately for 0ms perceived latency when no image needs uploading
+    if (!currentImageFile) {
+      setNewComment('');
+      setSendAsChulbul(false);
+      setReplyingTo(null);
+    } else {
+      setIsSubmitting(true);
+    }
+
     try {
       let imageUrl = '';
-      if (imageFile) {
-        imageUrl = await uploadFileToCloudinary(imageFile);
+      if (currentImageFile) {
+        imageUrl = await uploadFileToCloudinary(currentImageFile);
+        setNewComment('');
+        setSendAsChulbul(false);
+        setImageFile(null);
+        setReplyingTo(null);
       }
 
-      const toxicWordsFound = getToxicWords(newComment.trim());
+      const toxicWordsFound = getToxicWords(rawText);
       const isToxic = toxicWordsFound.length > 0;
+      const nowMs = Date.now();
+      const tempId = `${nowMs}_${Math.random().toString(36).slice(2, 7)}`;
 
       const newCommentData: any = {
+        id: tempId,
         isToxic,
         toxicWords: toxicWordsFound,
-        text: newComment.trim(),
-        authorId: sendAsChulbul ? 'inspector-chulbul-bot' : user.uid,
-        authorName: sendAsChulbul
+        text: rawText,
+        authorId: currentSendAsChulbul ? 'inspector-chulbul-bot' : user.uid,
+        authorName: currentSendAsChulbul
           ? 'Inspector Chulbul 👮‍♂️'
           : profile?.fullName || profile?.username || 'Student',
-        authorPhoto: sendAsChulbul ? '/chulbul.png' : profile?.photoURL || '',
+        authorPhoto: currentSendAsChulbul ? '/chulbul.png' : profile?.photoURL || '',
         postId: post.id,
-        createdAtMs: Date.now(),
-        parentId: replyingTo ? replyingTo.id : null,
+        createdAtMs: nowMs,
+        parentId: currentReplyingTo ? currentReplyingTo.id : null,
         likesCount: 0,
         likedBy: [],
       };
@@ -117,30 +138,33 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
         newCommentData.imageUrl = imageUrl;
       }
 
-      await saveSupabasePostComment(newCommentData);
-
       const nextCount = (post.commentsCount || comments.length || 0) + 1;
       post.commentsCount = nextCount;
-      await updateSupabaseCommunityPost(post.id, post, {
-        commentsCount: nextCount,
-      });
+
+      // Save comment (which synchronously updates memory cache & triggers UI in 0ms) + update post count in parallel
+      Promise.all([
+        saveSupabasePostComment(newCommentData),
+        updateSupabaseCommunityPost(post.id, post, {
+          commentsCount: nextCount,
+        }),
+      ]).catch((err) => console.warn('Background comment sync warning:', err));
 
       if (profile && user) {
-        const notifySenderId = sendAsChulbul ? 'inspector-chulbul-bot' : user.uid;
-        const notifySenderName = sendAsChulbul
+        const notifySenderId = currentSendAsChulbul ? 'inspector-chulbul-bot' : user.uid;
+        const notifySenderName = currentSendAsChulbul
           ? 'Inspector Chulbul 👮‍♂️'
           : profile.fullName || 'User';
-        const notifySenderAvatar = sendAsChulbul ? '/chulbul.png' : profile.photoURL || '';
+        const notifySenderAvatar = currentSendAsChulbul ? '/chulbul.png' : profile.photoURL || '';
 
-        if (replyingTo && replyingTo.authorId !== notifySenderId) {
+        if (currentReplyingTo && currentReplyingTo.authorId !== notifySenderId) {
           createNotification({
-            recipientId: replyingTo.authorId || post.authorId,
+            recipientId: currentReplyingTo.authorId || post.authorId,
             senderId: notifySenderId,
             senderName: notifySenderName,
             senderAvatar: notifySenderAvatar,
             type: 'reply',
             postId: post.id,
-            commentId: replyingTo.id,
+            commentId: currentReplyingTo.id,
             commentContent: newCommentData.text,
           });
         } else if (post.authorId !== notifySenderId) {
@@ -156,20 +180,7 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
           });
         }
       }
-      
-      
-
-      setNewComment('');
-      setSendAsChulbul(false);
-      setImageFile(null);
-      setReplyingTo(null);
-      
-
-      // Optional: scroll to top since sorting newest first
-      if (scrollRef.current) {
-        scrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding comment:", error?.message || 'Error');
     } finally {
       setIsSubmitting(false);
@@ -226,7 +237,7 @@ export default function CommentsModal({ post, author, isOpen, onClose }: Comment
                 </div>
                 <div>
                   <div className="flex items-center space-x-2">
-                    <h3 className="font-bold text-slate-900 dark:text-white">{getFirstName(author?.fullName) || 'Loading...'}</h3>
+                    <h3 className="font-bold text-slate-900 dark:text-white">{getFirstName(author?.fullName || post.authorName) || 'Student'}</h3>
                     {author?.role === 'admin' && (
                       <span className="text-[10px] font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white px-1.5 py-0.5 rounded shadow-sm border border-cyan-400/50 uppercase tracking-wide">Admin</span>
                     )}
@@ -510,7 +521,18 @@ interface CommentItemProps {
 
 const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => {
   const { user, profile } = useAuth();
-  const [author, setAuthor] = useState<any>(null);
+  const [author, setAuthor] = useState<any>(() => {
+    const instant = getInstantCachedUserProfile(comment.authorId);
+    if (instant && !instant._notFound) return instant;
+    if ((comment as any).authorName) {
+      return {
+        uid: comment.authorId,
+        fullName: (comment as any).authorName,
+        photoURL: (comment as any).authorPhoto || '',
+      };
+    }
+    return null;
+  });
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(comment.text);
@@ -541,20 +563,12 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
 
   useEffect(() => {
     let active = true;
-    if ((comment as any).authorName) {
-      setAuthor({
-        fullName: (comment as any).authorName,
-        photoURL: (comment as any).authorPhoto || '',
-      });
-    }
-    const fetchAuthor = async () => {
-      if (comment.authorId === 'inspector-chulbul-bot') return;
-      const cached = await getCachedUserProfile(comment.authorId);
+    if (comment.authorId === 'inspector-chulbul-bot') return;
+    getCachedUserProfile(comment.authorId).then((cached) => {
       if (active && cached) {
         setAuthor(cached);
       }
-    };
-    fetchAuthor();
+    });
     return () => {
       active = false;
     };
@@ -724,7 +738,7 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
           <div className="flex items-center justify-between mb-1">
             {comment.isDeleted && <div className="text-[10px] text-red-500 font-bold mb-1 flex items-center gap-1 bg-red-50 px-2 py-1 rounded w-fit border border-red-100"><ShieldAlert className="w-3 h-3" />This comment was deleted by sender</div>}
             <div className="flex items-center space-x-2 min-w-0">
-              <button onClick={() => setShowProfileModal(true)} className="text-sm font-bold text-slate-900 dark:text-white truncate hover:underline focus:outline-none text-left">{getFirstName(author?.fullName) || 'Loading...'}</button>
+              <button onClick={() => setShowProfileModal(true)} className="text-sm font-bold text-slate-900 dark:text-white truncate hover:underline focus:outline-none text-left">{getFirstName(author?.fullName || (comment as any).authorName) || 'Student'}</button>
               {author?.role === 'admin' && (
                 <span className="text-[9px] font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white px-1.5 py-0.5 rounded shadow-sm border border-cyan-400/50 uppercase tracking-wide shrink-0">Admin</span>
               )}

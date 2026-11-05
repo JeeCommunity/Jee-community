@@ -10,18 +10,20 @@ import PostCard from '../components/PostCard';
 import AdminStatusRow from '../components/AdminStatusRow';
 import CreatePostModal from '../components/CreatePostModal';
 import InstallAppButton from '../components/InstallAppButton';
+import JeeCountdownBanner from '../components/JeeCountdownBanner';
 import { cn } from '../lib/utils';
 import { ensureMigrationPinnedAtTop } from '../lib/migrationBridge';
 import {
   fetchSupabaseCommunityPosts,
   subscribeSupabaseCommunityPosts,
+  getInstantCommunityPosts,
 } from '../lib/supabaseHub';
 
 const TAGS = ['All', 'Physics', 'Chemistry', 'Maths', 'Doubts', 'Notes', 'General'];
 
 export default function Community() {
   const { user, profile, loading } = useAuth();
-  const [posts, setPosts] = useState<any[]>([]);
+  const [posts, setPosts] = useState<any[]>(() => getInstantCommunityPosts());
   const [activeTab, setActiveTab] = useState<'all' | 'mine'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -153,6 +155,9 @@ export default function Community() {
           </div>
 
         </div>
+
+        {/* Live JEE Main 2028 1st & 2nd Attempt Countdown */}
+        <JeeCountdownBanner />
         
         {/* Admin Status Row */}
         <AdminStatusRow />
