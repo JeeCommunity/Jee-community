@@ -232,7 +232,7 @@ export async function getCachedUserProfile(uid: string): Promise<any | null> {
   const fetchPromise = (async () => {
     try {
       const rows = await queryHubRows(
-        `select=*&id=eq.${encodeURIComponent(`uprofile_${uid}`)}&limit=1`
+        `select=id,created_at,comments&id=eq.${encodeURIComponent(`uprofile_${uid}`)}&limit=1`
       );
       if (rows.length > 0) {
         const decoded = decodeHubPayload(rows[0]);
@@ -506,7 +506,7 @@ export async function sendSupabaseGlobalNotification(
 export async function fetchUserSupabaseNotifications(uid: string): Promise<any[]> {
   if (!uid) return [];
   const rows = await queryHubRows(
-    `select=*&video_type=eq.hub_notification&chapter=in.(ALL,${encodeURIComponent(uid)})&order=created_at.desc&limit=35`
+    `select=id,created_at,comments&video_type=eq.hub_notification&chapter=in.(ALL,${encodeURIComponent(uid)})&order=created_at.desc&limit=20`
   );
   const readIds = getReadNotificationIds();
   const clearedIds = getClearedNotificationIds();
@@ -583,7 +583,7 @@ export function subscribeSupabaseNotifications(
     if (document.visibilityState === 'visible') {
       load();
     }
-  }, 6000);
+  }, 30000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'hub_notification') {
@@ -647,7 +647,7 @@ export async function getSupabaseStudySession(uid: string): Promise<any | null> 
   if (!uid) return null;
   const localMem = mySessionMemoryCache.get(uid);
   const rows = await queryHubRows(
-    `select=*&id=eq.${encodeURIComponent(`session_${uid}`)}&limit=1`
+    `select=id,created_at,comments&id=eq.${encodeURIComponent(`session_${uid}`)}&limit=1`
   );
   if (rows.length > 0) {
     const decoded = decodeHubPayload(rows[0]);
@@ -734,7 +734,7 @@ export async function saveSupabaseStudySession(uid: string, sessionData: any): P
 
 async function getSupabaseStudySessionOnceNoFallback(uid: string): Promise<any | null> {
   const rows = await queryHubRows(
-    `select=*&id=eq.${encodeURIComponent(`session_${uid}`)}&limit=1`
+    `select=id,created_at,comments&id=eq.${encodeURIComponent(`session_${uid}`)}&limit=1`
   );
   if (rows.length > 0) {
     return decodeHubPayload(rows[0]);
@@ -743,18 +743,18 @@ async function getSupabaseStudySessionOnceNoFallback(uid: string): Promise<any |
 }
 
 export async function fetchAllSupabaseStudySessions(todayDate: string): Promise<any[]> {
-  // Share recent result if fetched within last 1.8s (prevents duplicate polling from Layout + LiveStudy)
+  // Share recent result if fetched within last 8s (prevents duplicate polling from Layout + LiveStudy)
   if (
     sessionsMemoryCache &&
     sessionsMemoryCache.date === todayDate &&
-    Date.now() - sessionsMemoryCache.ts < 1800
+    Date.now() - sessionsMemoryCache.ts < 8000
   ) {
     return sessionsMemoryCache.list;
   }
 
   // Only fetch today's study sessions or currently studying sessions!
   const rows = await queryHubRows(
-    `select=*&video_type=eq.study_session&or=(subject.eq.${encodeURIComponent(todayDate)},chapter.eq.studying)&limit=80`
+    `select=id,created_at,comments&video_type=eq.study_session&or=(subject.eq.${encodeURIComponent(todayDate)},chapter.eq.studying)&limit=60`
   );
 
   const map = new Map<string, any>();
@@ -862,7 +862,7 @@ export function subscribeSupabaseStudySessions(
     if (document.visibilityState === 'visible') {
       refresh();
     }
-  }, 4500);
+  }, 15000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'study_session') {
@@ -891,7 +891,7 @@ export function subscribeSupabaseStudySessions(
 export async function fetchSupabaseStudyGroups(uid: string): Promise<any[]> {
   if (!uid) return [];
   const rows = await queryHubRows(
-    `select=*&video_type=eq.study_group&order=created_at.desc&limit=100`
+    `select=id,created_at,comments&video_type=eq.study_group&order=created_at.desc&limit=80`
   );
   const groupsMap = new Map<string, any>();
 
@@ -908,7 +908,7 @@ export async function fetchSupabaseStudyGroups(uid: string): Promise<any[]> {
 export async function getSupabaseStudyGroupByCode(shortCode: string): Promise<any | null> {
   const code = shortCode.trim().toUpperCase();
   const rows = await queryHubRows(
-    `select=*&id=eq.${encodeURIComponent(`group_${code}`)}&limit=1`
+    `select=id,created_at,comments&id=eq.${encodeURIComponent(`group_${code}`)}&limit=1`
   );
   if (rows.length > 0) {
     const decoded = decodeHubPayload(rows[0]);
@@ -954,7 +954,7 @@ export async function saveSupabaseStudyGroup(groupData: any): Promise<any> {
 
 async function getSupabaseStudyGroupByCodeNoFallback(code: string): Promise<any | null> {
   const rows = await queryHubRows(
-    `select=*&id=eq.${encodeURIComponent(`group_${code}`)}&limit=1`
+    `select=id,created_at,comments&id=eq.${encodeURIComponent(`group_${code}`)}&limit=1`
   );
   if (rows.length > 0) {
     return decodeHubPayload(rows[0]);
@@ -1030,7 +1030,7 @@ export function subscribeSupabaseGroupMessages(
     if (document.visibilityState === 'visible') {
       load();
     }
-  }, 3000);
+  }, 8000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'study_group') {
@@ -1053,7 +1053,7 @@ export function subscribeSupabaseGroupMessages(
 export async function fetchSupabaseNotes(category: string, subject: string): Promise<any[]> {
   const cacheKey = `${category}__${subject}`;
   const rows = await queryHubRows(
-    `select=*&video_type=eq.notes_hub&chapter=eq.${encodeURIComponent(category)}&subject=eq.${encodeURIComponent(subject)}&order=created_at.desc&limit=120`
+    `select=id,created_at,views,likes,comments&video_type=eq.notes_hub&chapter=eq.${encodeURIComponent(category)}&subject=eq.${encodeURIComponent(subject)}&order=created_at.desc&limit=100`
   );
 
   const notesMap = new Map<string, any>();
@@ -1234,12 +1234,12 @@ export function getInstantCommunityPosts(): any[] {
 }
 
 export async function fetchSupabaseCommunityPosts(forceNetwork = false): Promise<any[]> {
-  if (!forceNetwork && postsMemoryCache && Date.now() - postsLastFetchedAt < 2000) {
+  if (!forceNetwork && postsMemoryCache && Date.now() - postsLastFetchedAt < 8000) {
     return postsMemoryCache;
   }
 
   const rows = await queryHubRows(
-    `select=*&video_type=eq.community_post&order=created_at.desc&limit=65`
+    `select=id,created_at,comments&video_type=eq.community_post&order=created_at.desc&limit=45`
   );
 
   const postsMap = new Map<string, any>();
@@ -1395,7 +1395,7 @@ export function subscribeSupabaseCommunityPosts(onUpdate: (posts: any[]) => void
     if (document.visibilityState === 'visible') {
       load(true);
     }
-  }, 6000);
+  }, 20000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'community_post') {
@@ -1469,7 +1469,7 @@ function saveInstantPostComments(rawPostId: string, list: any[]) {
 export async function fetchSupabasePostComments(postId: string): Promise<any[]> {
   const rawPostId = String(postId).replace(/^post_/, '');
   const rows = await queryHubRows(
-    `select=*&video_type=eq.post_comment&chapter=eq.${encodeURIComponent(rawPostId)}&order=created_at.asc&limit=150`
+    `select=id,created_at,comments&video_type=eq.post_comment&chapter=eq.${encodeURIComponent(rawPostId)}&order=created_at.asc&limit=120`
   );
 
   const commentsMap = new Map<string, any>();
@@ -1592,7 +1592,7 @@ export function subscribeSupabasePostComments(
     if (document.visibilityState === 'visible') {
       load();
     }
-  }, 4000);
+  }, 12000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'post_comment') {
