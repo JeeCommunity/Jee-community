@@ -7,7 +7,8 @@ export type HubRecordType =
   | 'community_post'
   | 'post_comment'
   | 'hub_notification'
-  | 'user_profile';
+  | 'user_profile'
+  | 'admin_status';
 
 const HUB_EVENT_NAME = 'jee-supabase-hub-sync';
 const READ_NOTIFS_STORAGE_KEY = 'jee_hub_read_notif_ids_v1';
@@ -1610,3 +1611,249 @@ export function subscribeSupabasePostComments(
     window.removeEventListener(HUB_EVENT_NAME, handleSync);
   };
 }
+
+// ============================================================================
+// 8. ADMIN STATUSES & DIWALI FESTIVE VIDEO STATUS (`admin_status` in Supabase)
+// ============================================================================
+
+const FAST_STATUSES_CACHE_KEY = 'jee_hub_fast_admin_statuses_v1';
+let statusesMemoryCache: any[] | null = null;
+let statusesLastFetchedAt = 0;
+
+export const DEFAULT_DIWALI_STATUS_ID = 'diwali_special_2026';
+
+function createDefaultDiwaliStatus(overrides?: Partial<any>): any {
+  const createdMs = overrides?.createdAtMs || Date.now();
+  return {
+    id: DEFAULT_DIWALI_STATUS_ID,
+    type: 'diwali_video',
+    title: 'Happy Diwali to You & Your Family',
+    caption:
+      'Aap sabhi JEE Community members aur aapke poore parivaar ko Diwali ki dher saari shubhkamnayein! Yeh roshni ka tyohaar aapke ghar me khushiyan, sukh-shanti aur samriddhi le kar aaye. Happy Diwali!',
+    viewsCount: Math.max(Number(overrides?.viewsCount) || 48, 48),
+    wishesCount: Math.max(Number(overrides?.wishesCount) || 32, 32),
+    isHidden: Boolean(overrides?.isHidden),
+    authorId: 'admin',
+    createdAtMs: createdMs,
+    createdAt: {
+      toDate: () => new Date(createdMs),
+      toMillis: () => createdMs,
+    },
+    ...(overrides || {}),
+  };
+}
+
+function hydrateStatusItem(raw: any): any {
+  const ms =
+    typeof raw.createdAtMs === 'number'
+      ? raw.createdAtMs
+      : raw._rowCreatedAt
+      ? new Date(raw._rowCreatedAt).getTime()
+      : Date.now();
+  return {
+    ...raw,
+    id: raw.id || String(raw._rowId || '').replace(/^astatus_/, ''),
+    viewsCount: Math.max(Number(raw.viewsCount ?? raw._rowViews ?? 1), 1),
+    wishesCount: Math.max(Number(raw.wishesCount ?? raw._rowLikes ?? 0), 0),
+    createdAtMs: ms,
+    createdAt: {
+      toDate: () => new Date(ms),
+      toMillis: () => ms,
+    },
+  };
+}
+
+export function getInstantAdminStatuses(): any[] {
+  if (statusesMemoryCache && statusesMemoryCache.length > 0) {
+    return statusesMemoryCache;
+  }
+  try {
+    const raw = localStorage.getItem(FAST_STATUSES_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        statusesMemoryCache = parsed.map(hydrateStatusItem);
+        return statusesMemoryCache;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [createDefaultDiwaliStatus()];
+}
+
+function saveFastStatusesCache(list: any[]) {
+  statusesMemoryCache = list;
+  statusesLastFetchedAt = Date.now();
+  try {
+    const serializable = list.map((s) => {
+      const copy = { ...s };
+      delete copy.createdAt;
+      return copy;
+    });
+    localStorage.setItem(FAST_STATUSES_CACHE_KEY, JSON.stringify(serializable));
+  } catch {
+    // ignore
+  }
+}
+
+export async function fetchSupabaseAdminStatuses(force = false): Promise<any[]> {
+  if (!force && statusesMemoryCache && Date.now() - statusesLastFetchedAt < 15000) {
+    return statusesMemoryCache;
+  }
+
+  const rows = await queryHubRows(
+    `select=id,created_at,views,likes,comments&video_type=eq.admin_status&order=created_at.desc&limit=15`
+  );
+
+  let diwaliOverride: any = null;
+  const customStatuses: any[] = [];
+
+  for (const row of rows) {
+    const decoded = decodeHubPayload(row);
+    if (!decoded) continue;
+    const rawId = decoded.id || String(row.id).replace(/^astatus_/, '');
+    const hydrated = hydrateStatusItem({
+      ...decoded,
+      id: rawId,
+      _rowViews: row.views,
+      _rowLikes: row.likes,
+      _rowCreatedAt: row.created_at,
+    });
+    if (rawId === DEFAULT_DIWALI_STATUS_ID) {
+      diwaliOverride = hydrated;
+    } else if (!hydrated.isDeleted) {
+      customStatuses.push(hydrated);
+    }
+  }
+
+  const diwaliStatus = createDefaultDiwaliStatus(
+    diwaliOverride
+      ? {
+          ...diwaliOverride,
+          viewsCount: Math.max(Number(diwaliOverride.viewsCount) || 48, 48),
+          wishesCount: Math.max(Number(diwaliOverride.wishesCount) || 32, 32),
+        }
+      : undefined
+  );
+
+  const finalList = diwaliStatus.isHidden
+    ? customStatuses
+    : [diwaliStatus, ...customStatuses];
+
+  saveFastStatusesCache(finalList);
+  return finalList;
+}
+
+export async function saveSupabaseAdminStatus(statusData: any): Promise<any> {
+  const rawId = String(
+    statusData.id || `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+  ).replace(/^astatus_/, '');
+  const rowId = `astatus_${rawId}`;
+  const createdAtMs = statusData.createdAtMs || Date.now();
+
+  const clean = {
+    ...statusData,
+    id: rawId,
+    createdAtMs,
+    viewsCount: Math.max(Number(statusData.viewsCount) || 1, 1),
+    wishesCount: Math.max(Number(statusData.wishesCount) || 0, 0),
+  };
+  delete clean.createdAt;
+
+  await upsertHubRow(
+    encodeHubRow({
+      id: rowId,
+      recordType: 'admin_status',
+      title: clean.title || clean.caption || 'Admin Status',
+      description: clean.caption || '',
+      subject: clean.type || 'image',
+      chapter: 'status',
+      author_uid: clean.authorId || 'admin',
+      author_name: 'Admin',
+      views: clean.viewsCount,
+      likes: clean.wishesCount,
+      payload: clean,
+      created_at: new Date(createdAtMs).toISOString(),
+    })
+  );
+
+  await fetchSupabaseAdminStatuses(true);
+  emitHubSync('admin_status', rawId);
+  return hydrateStatusItem(clean);
+}
+
+export async function deleteSupabaseAdminStatus(statusId: string): Promise<void> {
+  const rawId = String(statusId).replace(/^astatus_/, '');
+  if (rawId === DEFAULT_DIWALI_STATUS_ID) {
+    // Hide the built-in Diwali status if Admin explicitly deletes it
+    const current = getInstantAdminStatuses().find((s) => s.id === DEFAULT_DIWALI_STATUS_ID);
+    await saveSupabaseAdminStatus({
+      ...(current || createDefaultDiwaliStatus()),
+      id: DEFAULT_DIWALI_STATUS_ID,
+      isHidden: true,
+    });
+    return;
+  }
+  await deleteHubRow(`astatus_${rawId}`);
+  const currentList = getInstantAdminStatuses().filter((s) => s.id !== rawId);
+  saveFastStatusesCache(currentList);
+  emitHubSync('admin_status', rawId);
+}
+
+export async function restoreDefaultDiwaliStatus(): Promise<any> {
+  const existing = (await fetchSupabaseAdminStatuses(true)).find(
+    (s) => s.id === DEFAULT_DIWALI_STATUS_ID
+  );
+  return saveSupabaseAdminStatus({
+    ...createDefaultDiwaliStatus(existing),
+    id: DEFAULT_DIWALI_STATUS_ID,
+    isHidden: false,
+  });
+}
+
+export async function recordSupabaseStatusInteraction(
+  statusItem: any,
+  kind: 'view' | 'wish'
+): Promise<{ viewsCount: number; wishesCount: number }> {
+  const rawId = String(statusItem?.id || DEFAULT_DIWALI_STATUS_ID).replace(/^astatus_/, '');
+  const nextViews =
+    (Number(statusItem?.viewsCount) || 48) + (kind === 'view' ? 1 : 0);
+  const nextWishes =
+    (Number(statusItem?.wishesCount) || 32) + (kind === 'wish' ? 1 : 0);
+
+  // Optimistically update memory & localStorage cache in 0ms
+  const currentList = getInstantAdminStatuses().map((s) =>
+    s.id === rawId ? { ...s, viewsCount: nextViews, wishesCount: nextWishes } : s
+  );
+  saveFastStatusesCache(currentList);
+
+  const cleanPayload = {
+    ...(statusItem?.id === DEFAULT_DIWALI_STATUS_ID
+      ? createDefaultDiwaliStatus(statusItem)
+      : statusItem),
+    id: rawId,
+    viewsCount: nextViews,
+    wishesCount: nextWishes,
+  };
+  delete cleanPayload.createdAt;
+
+  await upsertHubRow(
+    encodeHubRow({
+      id: `astatus_${rawId}`,
+      recordType: 'admin_status',
+      title: cleanPayload.title || cleanPayload.caption || 'Admin Status',
+      description: cleanPayload.caption || '',
+      subject: cleanPayload.type || 'diwali_video',
+      chapter: 'status',
+      author_uid: 'admin',
+      author_name: 'Admin',
+      views: nextViews,
+      likes: nextWishes,
+      payload: cleanPayload,
+    })
+  );
+
+  return { viewsCount: nextViews, wishesCount: nextWishes };
+}
+
