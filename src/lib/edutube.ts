@@ -418,17 +418,34 @@ export function toggleSavedVideoId(videoId: string): string[] {
   return next;
 }
 
+export function extractYouTubeIdFromUrl(url: string): string | null {
+  if (!url) return null;
+  const match = url.match(
+    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/
+  );
+  return match ? match[1] : null;
+}
+
 function normalizeVideoRow(r: any): EduTubeVideo {
   const rawTagSource = Array.isArray(r.tags) ? r.tags : r.chapter || '';
   const tags = parseVideoTags(rawTagSource, r.title || '', r.description || '');
+  const rawVideoUrl = String(r.video_url || '').trim();
+  const ytId = extractYouTubeIdFromUrl(rawVideoUrl);
+  const rawThumb = String(r.thumbnail_url || '').trim();
+  const isSvgPlaceholder = !rawThumb || rawThumb.startsWith('data:image/svg+xml');
+
+  const resolvedThumbnail =
+    isSvgPlaceholder && ytId
+      ? `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`
+      : rawThumb ||
+        createCustomBannerThumbnail(r.title || 'EduTube Video', tags.slice(0, 3).join(' · '));
+
   return {
     id: String(r.id),
     title: r.title || 'Untitled Video',
     description: r.description || '',
-    video_url: r.video_url || '',
-    thumbnail_url:
-      r.thumbnail_url ||
-      createCustomBannerThumbnail(r.title || 'EduTube Video', tags.slice(0, 3).join(' · ')),
+    video_url: rawVideoUrl,
+    thumbnail_url: resolvedThumbnail,
     duration: r.duration || (r.video_type === 'live' ? 'LIVE' : '05:00'),
     video_type:
       r.video_type === 'short'

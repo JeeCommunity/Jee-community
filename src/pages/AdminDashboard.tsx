@@ -159,6 +159,112 @@ export default function AdminDashboard() {
   const [usersLastDoc, setUsersLastDoc] = useState<any>(null);
   const [usersHasMore, setUsersHasMore] = useState<boolean>(true);
   const [broadcastingBot, setBroadcastingBot] = useState(false);
+  const [investigationProfiles, setInvestigationProfiles] = useState<Record<string, any>>({});
+  const [isLoadingInvestigation, setIsLoadingInvestigation] = useState<boolean>(false);
+
+  const INVESTIGATION_ACCOUNTS = [
+    {
+      uid: 'O6bMqURy3NRFuzuDACeOWwNe8JT2',
+      badge: '🚨 GALI ID #1 (JAYA → SHIVANI)',
+      badgeColor: 'bg-red-100 text-red-700 border-red-300',
+      originalName: 'Jaya (Joined 30 July 2026, 7:16 PM)',
+      nameHistory: 'Jaya (30 Jul – 14 Nov 11:25 AM) → Shivani18 (@shivani18 at 11:30 AM) → Shivani (@shivani at 11:39 AM)',
+      preIncidentActivity: 'Role: Regular User (user) • EduTube Channel: 0 Videos, 0 Shorts, 0 Comments • Live Study: 0 XP, 0 Coins, 0 Sessions • Community: 30 July se 14 Nov subah 11:24 AM tak koi post nahi; 11:24 AM par "Jaya" naam se Hrizzz ki 2 posts like ki, fir 11:30 AM par naam "Shivani18" karke gali wali post daali.',
+      oldDpUrl: 'https://res.cloudinary.com/gg0rxzjm/image/upload/v1785419169/cbd0pofh8fnxppjsruvr.jpg',
+      oldDpLabel: 'Jaya DP (2 Kittens Lockscreen - 30 Jul)',
+      currentDpUrl: 'https://res.cloudinary.com/gg0rxzjm/image/upload/v1785419169/cbd0pofh8fnxppjsruvr.jpg',
+      fallbackUsername: 'shivani',
+    },
+    {
+      uid: 'ABl3Wa5ddDS89A1h9RDjig4VOkw2',
+      badge: '🚨 GALI ID #2 (2nd ALT ID)',
+      badgeColor: 'bg-red-100 text-red-700 border-red-300',
+      originalName: '꧁༺ (@radhekrishn — Joined 14 Nov 2026, 2:41 PM)',
+      nameHistory: '꧁༺ (@radhekrishn — Jaya ID ban hone ke 43 sec baad banayi)',
+      preIncidentActivity: 'Role: Regular User (user) • 0 XP, 0 Coins, 0 Videos • Red Hoodie Neon X-Mask DP • Banate hi 2:48 PM aur 2:54 PM par 2 gali wali posts daali.',
+      oldDpUrl: 'https://res.cloudinary.com/gg0rxzjm/image/upload/v1794647367/gim14nbhigfdkgqnznjr.jpg',
+      oldDpLabel: 'Red Hoodie X-Mask DP (14 Nov)',
+      currentDpUrl: 'https://res.cloudinary.com/gg0rxzjm/image/upload/v1794647367/gim14nbhigfdkgqnznjr.jpg',
+      fallbackUsername: 'radhekrishn',
+    },
+    {
+      uid: '5lp59j7QXXQgddnHACIPKCWDfjt2',
+      badge: '⚠️ FAKE ID #3 (ALT ID)',
+      badgeColor: 'bg-amber-100 text-amber-800 border-amber-300',
+      originalName: 'Shivani (@unknown — Synced 14 Nov 2026, 6:34 AM)',
+      nameHistory: 'Shivani (@unknown)',
+      preIncidentActivity: 'Role: Regular User (user) • 0 XP, 0 Coins, 0 Videos • Anime Boy in Rain DP uploaded on 10 Sep 2026 (10:29 PM IST).',
+      oldDpUrl: 'https://res.cloudinary.com/gg0rxzjm/image/upload/v1789059551/njfkrgpm7dkxprsukjob.jpg',
+      oldDpLabel: 'Anime Boy in Rain DP (10 Sep)',
+      currentDpUrl: 'https://res.cloudinary.com/gg0rxzjm/image/upload/v1789059551/njfkrgpm7dkxprsukjob.jpg',
+      fallbackUsername: 'unknown',
+    },
+    {
+      uid: 'vKku8roxMDWEKulaCI5hJkaGmK82',
+      badge: '✅ REAL SHIVANI (INNOCENT STUDENT)',
+      badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+      originalName: '𝑻𝒉𝒆_𝑼𝒏𝒔𝒕𝒐𝒑𝒑𝒂𝒃𝒍𝒆 (Joined 10 Nov 2026)',
+      nameHistory: '1) 𝑻𝒉𝒆_𝑼𝒏𝒔𝒕𝒐𝒑𝒑𝒂𝒃𝒍𝒆 (10 Nov) → 2) Shivani Sharma (11 Nov) → 3) Shivani (11 Nov) → 4) ꧁༺ ༻꧂ @radhekrishna (12-14 Nov) → 5) Shivani (14 Nov 3:18 PM) → 6) Shivaniiiiiiiiii @kakashi (14 Nov 11:07 PM)',
+      preIncidentActivity: 'Role: Student (user) • 1,071 XP • 2,434 Coins • Regular Live Study user since 10 Nov • Koi gali wali post nahi ki.',
+      oldDpUrl: 'https://siudeeqkpljaxgivnydh.supabase.co/storage/v1/object/public/edutube-media/uploads/1794325297528_3pyp_Screenshot_2026-11-10-21-05-31-52_40deb4.jpg',
+      oldDpLabel: 'Pehle Wala DP (10 Nov – 14 Nov)',
+      currentDpUrl: 'https://siudeeqkpljaxgivnydh.supabase.co/storage/v1/object/public/edutube-media/uploads/1794650238431_mgo0_Screenshot_2026-11-13-23-19-29-75_40deb4.jpg',
+      fallbackUsername: 'kakashi',
+    },
+  ];
+
+  const [extraShivaniAccounts, setExtraShivaniAccounts] = useState<any[]>([]);
+
+  const loadInvestigationProfiles = async () => {
+    if (!db) return;
+    setIsLoadingInvestigation(true);
+    try {
+      const entries = await Promise.all(
+        INVESTIGATION_ACCOUNTS.map(async (item) => {
+          try {
+            const snap = await getDoc(doc(db, 'users', item.uid));
+            if (snap.exists()) {
+              return [item.uid, { id: snap.id, ...snap.data() }];
+            }
+          } catch (e) {
+            console.error('Failed to fetch investigation doc:', item.uid, e);
+          }
+          return [item.uid, null];
+        })
+      );
+      const map: Record<string, any> = {};
+      for (const [uid, data] of entries) {
+        if (uid && data) map[uid as string] = data;
+      }
+      setInvestigationProfiles(map);
+
+      // Also auto-discover any older Shivani accounts in Firebase Firestore (e.g. from July/Aug/Sep/Oct)
+      const knownUids = new Set(INVESTIGATION_ACCOUNTS.map(a => a.uid));
+      const [s1, s2, s3] = await Promise.all([
+        getDocs(query(collection(db, 'users'), where('username', '>=', 'shivani'), where('username', '<=', 'shivani\uf8ff'), limit(15))).catch(() => null),
+        getDocs(query(collection(db, 'users'), where('fullName', '>=', 'Shivani'), where('fullName', '<=', 'Shivani\uf8ff'), limit(15))).catch(() => null),
+        getDocs(query(collection(db, 'users'), where('fullName', '>=', 'shivani'), where('fullName', '<=', 'shivani\uf8ff'), limit(15))).catch(() => null),
+      ]);
+      const extraMap = new Map<string, any>();
+      for (const snap of [s1, s2, s3]) {
+        if (!snap) continue;
+        snap.docs.forEach(d => {
+          if (!knownUids.has(d.id)) {
+            extraMap.set(d.id, { id: d.id, ...d.data() });
+          }
+        });
+      }
+      setExtraShivaniAccounts(Array.from(extraMap.values()));
+    } finally {
+      setIsLoadingInvestigation(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      loadInvestigationProfiles();
+    }
+  }, [activeTab]);
 
   const handleBroadcastBotToAllGroups = async () => {
     if (!studyGroups || studyGroups.length === 0) return;
@@ -853,7 +959,7 @@ export default function AdminDashboard() {
 
   const handleSearchUsers = async (e: React.FormEvent) => {
     e.preventDefault();
-    const term = searchQuery.trim();
+    const term = searchQuery.trim().replace(/^@/, '');
     if (!term) {
       setSearchResults([]);
       return;
@@ -870,10 +976,15 @@ export default function AdminDashboard() {
       // 4. Prefix search on fullName (capitalized first letter, common case)
       const termCapitalized = term.charAt(0).toUpperCase() + term.slice(1).toLowerCase();
       const q4 = query(collection(db, 'users'), where('fullName', '>=', termCapitalized), where('fullName', '<=', termCapitalized + '\uf8ff'), limit(10));
+      // 5. Direct UID lookup in case Admin searches by exact UID
+      const directDocPromise = getDoc(doc(db, 'users', term)).catch(() => null);
 
-      const [snap1, snap2, snap3, snap4] = await Promise.all([getDocs(q1), getDocs(q2), getDocs(q3), getDocs(q4)]);
+      const [snap1, snap2, snap3, snap4, directSnap] = await Promise.all([getDocs(q1), getDocs(q2), getDocs(q3), getDocs(q4), directDocPromise]);
       const resultsMap = new Map();
       
+      if (directSnap && directSnap.exists()) {
+        resultsMap.set(directSnap.id, { id: directSnap.id, ...directSnap.data() });
+      }
       snap1.docs.forEach(doc => resultsMap.set(doc.id, { id: doc.id, ...doc.data() }));
       snap2.docs.forEach(doc => resultsMap.set(doc.id, { id: doc.id, ...doc.data() }));
       snap3.docs.forEach(doc => resultsMap.set(doc.id, { id: doc.id, ...doc.data() }));
@@ -1783,12 +1894,196 @@ export default function AdminDashboard() {
                 </button>
               </form>
             </div>
+            {/* Forensic Investigation Card for Jaya / Shivani Accounts */}
+            <div className="p-5 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <h4 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-red-600" />
+                    <span>Jaya / Shivani Accounts — Direct Gmail, Old & Current DP, Role & XP Audit</span>
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Firebase Firestore se live Gmail ID, Joining Date, Role, XP aur Pehle wala / Abhi wala DP (Profile Photo) yahan direct dikh raha hai.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadInvestigationProfiles}
+                  disabled={isLoadingInvestigation}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 self-start sm:self-auto"
+                >
+                  <RefreshCw className={cn("w-3.5 h-3.5", isLoadingInvestigation && "animate-spin")} />
+                  <span>{isLoadingInvestigation ? 'Loading Firebase Data...' : 'Refresh Live Gmail & Data'}</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {INVESTIGATION_ACCOUNTS.map((acct) => {
+                  const fbUser = investigationProfiles[acct.uid];
+                  const emailVal = fbUser?.email || (isLoadingInvestigation ? 'Loading from Firebase...' : 'Not found / Deleted in Firestore');
+                  const fullNameVal = fbUser?.fullName || acct.originalName;
+                  const usernameVal = fbUser?.username || acct.fallbackUsername;
+                  const roleVal = fbUser?.role || 'user';
+                  const xpVal = Math.round(fbUser?.campus?.totalXP || 0);
+                  const coinsVal = Math.round(fbUser?.campus?.totalCoins || 0);
+                  const stateVal = fbUser?.state || '-';
+                  const classVal = fbUser?.studentClass || '-';
+                  const bioVal = fbUser?.bio || 'No bio';
+                  const createdRaw = fbUser?.createdAt?.toDate ? fbUser.createdAt.toDate().toLocaleString() : (fbUser?.createdAt ? String(fbUser.createdAt) : 'See forensic timestamp below');
+
+                  return (
+                    <div key={acct.uid} className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm flex flex-col justify-between gap-3">
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                          <span className={cn("text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border", acct.badgeColor)}>
+                            {acct.badge}
+                          </span>
+                          <span className="text-[11px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                            UID: {acct.uid}
+                          </span>
+                        </div>
+
+                        {/* Old & Current DP Preview */}
+                        <div className="flex items-center gap-4 my-3 p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200/70 dark:border-slate-700">
+                          <a href={acct.oldDpUrl} target="_blank" rel="noreferrer" className="group relative shrink-0 text-center" title="Click to open full size DP">
+                            <img src={acct.oldDpUrl} alt="Old DP" className="w-16 h-16 rounded-xl object-cover border-2 border-indigo-500 shadow-sm group-hover:scale-105 transition-transform" />
+                            <span className="block text-[10px] font-bold text-indigo-600 dark:text-indigo-400 mt-1">Pehle Wala DP ↗</span>
+                          </a>
+                          {acct.currentDpUrl !== acct.oldDpUrl && (
+                            <a href={acct.currentDpUrl} target="_blank" rel="noreferrer" className="group relative shrink-0 text-center" title="Click to open current DP">
+                              <img src={acct.currentDpUrl} alt="Current DP" className="w-16 h-16 rounded-xl object-cover border-2 border-emerald-500 shadow-sm group-hover:scale-105 transition-transform" />
+                              <span className="block text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-1">Abhi Wala DP ↗</span>
+                            </a>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-slate-900 dark:text-white text-sm truncate">
+                              {fullNameVal} <span className="text-slate-500 font-normal">(@{usernameVal})</span>
+                            </p>
+                            {/* Highlighted Gmail Box */}
+                            <div className="mt-1 flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 px-2.5 py-1 rounded-lg">
+                              <Mail className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
+                              <span className="text-xs font-bold text-amber-900 dark:text-amber-200 break-all">
+                                {emailVal}
+                              </span>
+                              {fbUser?.email && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(fbUser.email);
+                                    toast.success(`Copied Gmail: ${fbUser.email}`);
+                                  }}
+                                  className="ml-auto text-[10px] bg-amber-200/80 hover:bg-amber-300 text-amber-900 px-1.5 py-0.5 rounded font-bold shrink-0"
+                                >
+                                  Copy
+                                </button>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-1">
+                              <strong>Role:</strong> {roleVal} • <strong>XP:</strong> {xpVal} • <strong>Coins:</strong> {coinsVal} • <strong>State:</strong> {stateVal} ({classVal})
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-xs space-y-1 text-slate-700 dark:text-slate-300 bg-slate-50/70 dark:bg-slate-800/40 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                          <p><strong>📅 Joining / Firestore Created:</strong> {createdRaw}</p>
+                          <p><strong>🔄 Name Change History:</strong> {acct.nameHistory}</p>
+                          <p><strong>📊 Pre-Incident Channel & App Activity:</strong> {acct.preIncidentActivity}</p>
+                          <p><strong>📝 Firestore Bio:</strong> {bioVal}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        {fbUser && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedUser(fbUser)}
+                            className="px-2.5 py-1.5 text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg"
+                          >
+                            Full Profile
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleBlockUser(acct.uid, Boolean(fbUser?.isBlocked), fbUser || { id: acct.uid, fullName: fullNameVal, username: usernameVal })}
+                          className={cn(
+                            "px-2.5 py-1.5 text-xs font-bold rounded-lg",
+                            fbUser?.isBlocked ? "bg-green-100 text-green-700 hover:bg-green-200" : "bg-orange-100 text-orange-700 hover:bg-orange-200"
+                          )}
+                        >
+                          {fbUser?.isBlocked ? 'Unblock ID' : 'Block / Mute ID'}
+                        </button>
+                        {isSuperAdmin && acct.uid !== 'vKku8roxMDWEKulaCI5hJkaGmK82' && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(acct.uid, fbUser?.email)}
+                            className="px-2.5 py-1.5 text-xs font-bold bg-red-600 text-white hover:bg-red-700 rounded-lg"
+                          >
+                            Delete & Ban Gmail
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {extraShivaniAccounts.map((u) => {
+                  const createdRaw = u.createdAt?.toDate ? u.createdAt.toDate().toLocaleString() : (u.createdAt ? String(u.createdAt) : 'Old Firestore Account');
+                  const xpVal = Math.round(u.campus?.totalXP || 0);
+                  const coinsVal = Math.round(u.campus?.totalCoins || 0);
+                  return (
+                    <div key={u.id} className="bg-white dark:bg-slate-900 rounded-xl border border-indigo-200 dark:border-indigo-800 p-4 shadow-sm flex flex-col justify-between gap-3">
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                          <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border bg-indigo-100 text-indigo-800 border-indigo-300">
+                            🔍 OLD / OTHER SHIVANI IN FIRESTORE
+                          </span>
+                          <span className="text-[11px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                            UID: {u.id}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-4 my-3 p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200/70 dark:border-slate-700">
+                          {u.photoURL ? (
+                            <a href={u.photoURL} target="_blank" rel="noreferrer" className="shrink-0 text-center">
+                              <img src={u.photoURL} alt={u.fullName} className="w-16 h-16 rounded-xl object-cover border-2 border-indigo-500" />
+                              <span className="block text-[10px] font-bold text-indigo-600 mt-1">Open DP ↗</span>
+                            </a>
+                          ) : (
+                            <div className="w-16 h-16 rounded-xl bg-slate-200 dark:bg-slate-700 flex items-center justify-center font-bold text-slate-500">
+                              {(u.fullName || 'S')[0]}
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-slate-900 dark:text-white text-sm truncate">
+                              {u.fullName} <span className="text-slate-500 font-normal">(@{u.username})</span>
+                            </p>
+                            <div className="mt-1 flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 px-2.5 py-1 rounded-lg">
+                              <Mail className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                              <span className="text-xs font-bold text-amber-900 dark:text-amber-200 break-all">{u.email || 'No email'}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-1">
+                              <strong>Role:</strong> {u.role || 'user'} • <strong>XP:</strong> {xpVal} • <strong>Coins:</strong> {coinsVal} • <strong>State:</strong> {u.state || '-'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-xs space-y-1 text-slate-700 dark:text-slate-300 bg-slate-50/70 dark:bg-slate-800/40 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                          <p><strong>📅 Joining Date (createdAt):</strong> {createdRaw}</p>
+                          <p><strong>📝 Bio:</strong> {u.bio || 'No bio'}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <button type="button" onClick={() => setSelectedUser(u)} className="px-2.5 py-1.5 text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg">Full Profile</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <table className="w-full text-left">
               <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-sm font-medium">
                 <tr>
-                  <th className="px-6 py-4">User</th>
-                  <th className="px-6 py-4">State</th>
-                  <th className="px-6 py-4">Target Year</th>
+                  <th className="px-6 py-4">User, Gmail & UID</th>
+                  <th className="px-6 py-4">Role / XP</th>
+                  <th className="px-6 py-4">State / Class</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -1796,7 +2091,7 @@ export default function AdminDashboard() {
                 {!searchQuery ? (
                   <tr><td colSpan={4} className="p-8 text-center bg-slate-50 dark:bg-slate-800/50">
                     <p className="text-slate-600 dark:text-slate-400 font-medium mb-1">Search to manage users</p>
-                    <p className="text-sm text-slate-500 dark:text-slate-500">Find users by name, username, or email</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-500">Find users by name, @username, Gmail address, or exact UID</p>
                   </td></tr>
                 ) : searchResults.length === 0 ? (
                   <tr><td colSpan={4} className="p-6 text-center text-slate-500 dark:text-slate-400">No users found.</td></tr>
@@ -1806,25 +2101,34 @@ export default function AdminDashboard() {
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
                         {u.photoURL ? (
-                          <img src={u.photoURL} alt={getFirstName(u.fullName)} className="w-10 h-10 rounded-full object-cover" />
+                          <a href={u.photoURL} target="_blank" rel="noreferrer" title="Click to open full DP">
+                            <img src={u.photoURL} alt={getFirstName(u.fullName)} className="w-11 h-11 rounded-full object-cover border border-slate-200" />
+                          </a>
                         ) : (
-                          <div className="w-10 h-10 bg-slate-200 dark:bg-slate-700 rounded-full flex items-center justify-center font-bold text-slate-500 dark:text-slate-400">
+                          <div className="w-11 h-11 bg-slate-200 dark:bg-slate-700 rounded-full flex items-center justify-center font-bold text-slate-500 dark:text-slate-400">
                             {getFirstName(u.fullName)?.[0]?.toUpperCase()}
                           </div>
                         )}
                         <div>
                           <p className="font-bold text-slate-900 dark:text-white flex items-center space-x-2">
-                            <span>{getFirstName(u.fullName)}</span>
+                            <span>{u.fullName || getFirstName(u.fullName)}</span>
                             {u.isBlocked && <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[10px] font-bold rounded uppercase">Blocked</span>}
                             {u.role === 'admin' && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded uppercase">Admin</span>}
                             {u.role === 'community_manager' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded">🛡️ Manager</span>}
                           </p>
                           <p className="text-sm text-slate-500 dark:text-slate-400">@{u.username}</p>
+                          <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">
+                            📧 {u.email || 'No email recorded'}
+                          </p>
+                          <p className="text-[11px] font-mono text-slate-400">UID: {u.id}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-slate-500 dark:text-slate-400 text-sm">{u.state || '-'}</td>
-                    <td className="px-6 py-4 text-slate-500 dark:text-slate-400 text-sm">{u.targetYear || '-'}</td>
+                    <td className="px-6 py-4 text-slate-600 dark:text-slate-300 text-xs">
+                      <div className="font-bold uppercase">{u.role || 'user'}</div>
+                      <div>{Math.round(u.campus?.totalXP || 0)} XP • {Math.round(u.campus?.totalCoins || 0)} Coins</div>
+                    </td>
+                    <td className="px-6 py-4 text-slate-500 dark:text-slate-400 text-sm">{u.state || '-'} ({u.studentClass || u.targetYear || '-'})</td>
                     <td className="px-6 py-4 text-right space-x-2 whitespace-nowrap">
                       {isSuperAdmin && u.role !== 'admin' && (
                         u.role === 'community_manager' ? (
@@ -2597,8 +2901,12 @@ export default function AdminDashboard() {
                   </div>
                 )}
                 <div>
-                  <h4 className="text-xl font-bold text-slate-900 dark:text-white">{getFirstName(selectedUser.fullName)}</h4>
+                  <h4 className="text-xl font-bold text-slate-900 dark:text-white">{selectedUser.fullName || getFirstName(selectedUser.fullName)}</h4>
                   <p className="text-slate-500 dark:text-slate-400 font-medium">@{selectedUser.username}</p>
+                  <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-1 break-all">
+                    📧 {selectedUser.email || 'No email field on doc'}
+                  </p>
+                  <p className="text-[11px] font-mono text-slate-400 mt-0.5">UID: {selectedUser.id}</p>
                   <div className="flex space-x-2 mt-2">
                     {selectedUser.role === 'admin' && (
                       <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded uppercase">Admin</span>
@@ -2621,12 +2929,12 @@ export default function AdminDashboard() {
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
-                    <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-1">Target Exam</p>
-                    <p className="text-slate-900 dark:text-white font-semibold">{selectedUser.targetExam || '-'}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-1">Target Exam & Class</p>
+                    <p className="text-slate-900 dark:text-white font-semibold">{selectedUser.targetExam || '-'} ({selectedUser.studentClass || selectedUser.targetYear || '-'})</p>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
-                    <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-1">Target Year</p>
-                    <p className="text-slate-900 dark:text-white font-semibold">{selectedUser.targetYear || '-'}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-1">Role & XP / Coins</p>
+                    <p className="text-slate-900 dark:text-white font-semibold">{selectedUser.role || 'user'} • {Math.round(selectedUser.campus?.totalXP || 0)} XP</p>
                   </div>
                 </div>
                 
@@ -2662,10 +2970,10 @@ export default function AdminDashboard() {
                 </button>
                 {isSuperAdmin && (
                   <button 
-                    onClick={() => handleDeleteUser(selectedUser.id)}
+                    onClick={() => handleDeleteUser(selectedUser.id, selectedUser.email)}
                     className="px-4 py-2 text-sm font-semibold bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors"
                   >
-                    Delete Profile
+                    Delete Profile & Ban Email
                   </button>
                 )}
               </div>
