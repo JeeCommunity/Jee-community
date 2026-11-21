@@ -312,7 +312,6 @@ export default function AdminStatusRow() {
   };
 
   const hasStatusItems = isAdmin || statuses.length > 0;
-  const totalChaiCups = supporters.reduce((acc, item) => acc + (Number(item.cups) || 1), 0);
 
   return (
     <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 py-3 px-4 flex items-center gap-3.5 overflow-x-auto no-scrollbar">
@@ -387,33 +386,23 @@ export default function AdminStatusRow() {
         </button>
       ))}
 
-      {/* Buy Me a Chai Support Widget in the Empty Space Next to Status Circles */}
+      {/* Buy Me a Chai Card in the Empty Space Next to Status Circles */}
       <button
         type="button"
         onClick={() => setIsChaiModalOpen(true)}
         className={`${
           hasStatusItems ? 'ml-auto shrink-0' : 'w-full justify-between'
-        } min-h-[54px] flex items-center gap-3 px-3.5 py-2 rounded-2xl bg-amber-50/80 dark:bg-amber-950/25 border border-amber-200/90 dark:border-amber-800/50 hover:border-amber-400 dark:hover:border-amber-600 transition-colors cursor-pointer group text-left`}
+        } min-h-[52px] flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-50/80 dark:bg-amber-950/25 border border-amber-200/90 dark:border-amber-800/50 hover:border-amber-400 dark:hover:border-amber-600 transition-colors cursor-pointer group text-left`}
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/50 border border-amber-200/80 dark:border-amber-700/50 flex items-center justify-center text-amber-700 dark:text-amber-400 shrink-0">
             <Coffee className="w-4 h-4" />
           </div>
-          <div className="min-w-0">
-            <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white leading-tight whitespace-nowrap">
-              Buy Me a Chai
-            </div>
-            <div className="text-[11px] text-slate-600 dark:text-slate-400 whitespace-nowrap tabular-nums">
-              {totalChaiCups > 0
-                ? `${totalChaiCups} chai mil chuki · Ek aur pila do!`
-                : 'Neend bhagao, ek chai / coffee pila do!'}
-            </div>
-          </div>
+          <span className="text-sm font-bold text-slate-900 dark:text-white whitespace-nowrap">
+            Buy Me a Chai
+          </span>
         </div>
-        <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-amber-600 group-hover:bg-amber-700 text-white font-semibold text-xs transition-colors whitespace-nowrap shrink-0">
-          <span>Chai Pila Do</span>
-          <ChevronRight className="w-3.5 h-3.5" />
-        </div>
+        <ChevronRight className="w-4 h-4 text-amber-700 dark:text-amber-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
       </button>
 
       {/* Buy Me a Chai Razorpay Modal */}

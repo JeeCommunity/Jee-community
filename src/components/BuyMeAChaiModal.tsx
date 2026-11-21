@@ -35,10 +35,10 @@ interface BuyMeAChaiModalProps {
 }
 
 const CHAI_TIERS = [
-  { id: '1', cups: 1, label: 'Cutting Chai', amount: 19 },
-  { id: '2', cups: 2, label: 'Masala Chai', amount: 39 },
-  { id: '5', cups: 5, label: 'Cold Coffee', amount: 99 },
-  { id: '10', cups: 10, label: 'Tapri Treat', amount: 199 },
+  { id: '1', cups: 1, label: '1 Chai', amount: 19 },
+  { id: '2', cups: 2, label: '2 Chai', amount: 39 },
+  { id: '5', cups: 5, label: '5 Chai', amount: 99 },
+  { id: '10', cups: 10, label: '10 Chai', amount: 199 },
 ];
 
 let razorpayScriptPromise: Promise<boolean> | null = null;
@@ -127,11 +127,11 @@ export default function BuyMeAChaiModal({
     setConfigError(null);
 
     if (!Number.isFinite(effectiveAmount) || effectiveAmount < 10) {
-      toast.error('Minimum support amount ₹10 hai.');
+      toast.error('Minimum amount is ₹10.');
       return;
     }
     if (effectiveAmount > 50000) {
-      toast.error('Maximum single payment ₹50,000 hai.');
+      toast.error('Maximum single contribution is ₹50,000.');
       return;
     }
 
@@ -142,7 +142,7 @@ export default function BuyMeAChaiModal({
     try {
       const scriptLoaded = await loadRazorpayCheckoutScript();
       if (!scriptLoaded || !window.Razorpay) {
-        toast.error('Razorpay Checkout load nahi ho paya. Apna internet check karein.');
+        toast.error('Unable to load checkout. Please check your internet connection.');
         setIsProcessing(false);
         return;
       }
@@ -164,11 +164,10 @@ export default function BuyMeAChaiModal({
       if (!orderRes.ok) {
         if (orderData?.error === 'RAZORPAY_NOT_CONFIGURED') {
           setConfigError(
-            orderData?.message ||
-              'Razorpay keys abhi server par add nahi hui hain (RAZORPAY_KEY_ID aur RAZORPAY_KEY_SECRET).'
+            'Payment checkout is currently being configured. Please try again shortly.'
           );
         } else {
-          toast.error(orderData?.message || 'Razorpay order create nahi ho paya.');
+          toast.error(orderData?.message || 'Unable to start checkout. Please try again.');
         }
         setIsProcessing(false);
         return;
@@ -212,7 +211,7 @@ export default function BuyMeAChaiModal({
             const verifyData = await verifyRes.json().catch(() => ({}));
 
             if (!verifyRes.ok || !verifyData?.verified) {
-              toast.error(verifyData?.message || 'Payment verification fail ho gaya.');
+              toast.error(verifyData?.message || 'Payment verification failed.');
               setIsProcessing(false);
               return;
             }
@@ -231,7 +230,7 @@ export default function BuyMeAChaiModal({
             onSupportCompleted(savedRecord);
             setCompletedReceipt(savedRecord);
             setMessage('');
-            toast.success(`Waah ${displayName}! Chai mil gayi, dil khush ho gaya!`);
+            toast.success(`Thank you, ${displayName}!`);
 
             // Notify community admin (0 Firebase Reads - Supabase notification)
             createSupabaseNotification({
@@ -247,7 +246,7 @@ export default function BuyMeAChaiModal({
             }).catch(() => {});
           } catch (verifyErr) {
             console.error('Chai verification error:', verifyErr);
-            toast.error('Payment confirm karne me issue aaya. Kripya Admin ko contact karein.');
+            toast.error('Could not verify payment. Please contact Admin if amount was deducted.');
           } finally {
             setIsProcessing(false);
           }
@@ -256,7 +255,7 @@ export default function BuyMeAChaiModal({
 
       rzp.on('payment.failed', (failureResp: any) => {
         const reason =
-          failureResp?.error?.description || 'Payment complete nahi ho paya. Dobara try karein.';
+          failureResp?.error?.description || 'Payment could not be completed. Please try again.';
         toast.error(reason);
         setIsProcessing(false);
       });
@@ -264,7 +263,7 @@ export default function BuyMeAChaiModal({
       rzp.open();
     } catch (err) {
       console.error('Razorpay checkout error:', err);
-      toast.error('Payment start nahi ho paya. Kripya thodi der baad try karein.');
+      toast.error('Unable to start checkout. Please try again in a moment.');
       setIsProcessing(false);
     }
   };
@@ -295,10 +294,10 @@ export default function BuyMeAChaiModal({
                 </div>
                 <div className="min-w-0">
                   <h2 className="text-base font-bold text-slate-900 dark:text-white leading-tight truncate">
-                    Buy Me a Chai / Coffee
+                    Buy Me a Chai
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                    Raat 2 baje bhi app chala raha hu, ek chai toh banti hai
+                    Completely optional · Only if you&apos;d like to
                   </p>
                 </div>
               </div>
@@ -315,23 +314,40 @@ export default function BuyMeAChaiModal({
             {/* Scrollable Body */}
             <div className="p-5 overflow-y-auto space-y-5">
               {completedReceipt ? (
-                <div className="py-4 text-center space-y-4">
-                  <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="w-8 h-8" />
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="py-3 text-center space-y-4"
+                >
+                  <div className="relative w-16 h-16 mx-auto">
+                    <div className="w-16 h-16 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/70 flex items-center justify-center text-amber-600 dark:text-amber-400 shadow-sm">
+                      <Coffee className="w-8 h-8" />
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
+                      <CheckCircle2 className="w-4 h-4" />
+                    </div>
                   </div>
-                  <div className="space-y-1">
+
+                  <div className="space-y-2.5">
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                      Waah {completedReceipt.supporterName}, Dil Jeet Liya!
+                      Thank You, {completedReceipt.supporterName}! ☕
                     </h3>
-                    <p className="text-sm text-slate-600 dark:text-slate-300">
-                      Aapki{' '}
-                      <span className="font-bold text-amber-700 dark:text-amber-400 tabular-nums">
-                        ₹{completedReceipt.amountInr}
-                      </span>{' '}
-                      ({completedReceipt.cups} Chai) ki treat mil gayi. Ab coding 2x speed pe chalegi!
-                    </p>
+                    <div className="rounded-2xl bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200/80 dark:border-amber-800/45 px-4 py-3.5">
+                      <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
+                        &ldquo;Thank you so much for buying me a chai. Your kindness truly means a
+                        lot and keeps JEE Community growing for every aspirant. Wishing you all the
+                        very best in your preparation!&rdquo;
+                      </p>
+                    </div>
                   </div>
+
                   <div className="rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 p-3 text-left text-xs space-y-1.5">
+                    <div className="flex justify-between gap-2">
+                      <span className="text-slate-500 dark:text-slate-400">Chai Shared</span>
+                      <span className="font-semibold text-slate-900 dark:text-white tabular-nums">
+                        {completedReceipt.cups} Chai · ₹{completedReceipt.amountInr}
+                      </span>
+                    </div>
                     <div className="flex justify-between gap-2">
                       <span className="text-slate-500 dark:text-slate-400">Receipt ID</span>
                       <span className="font-mono font-medium text-slate-800 dark:text-slate-200 truncate">
@@ -339,39 +355,40 @@ export default function BuyMeAChaiModal({
                       </span>
                     </div>
                     {completedReceipt.message && (
-                      <div className="pt-1 border-t border-slate-200/70 dark:border-slate-700/70 text-slate-700 dark:text-slate-300">
+                      <div className="pt-1.5 border-t border-slate-200/70 dark:border-slate-700/70 text-slate-700 dark:text-slate-300">
                         &ldquo;{completedReceipt.message}&rdquo;
                       </div>
                     )}
                   </div>
+
                   <button
                     type="button"
-                    onClick={() => setCompletedReceipt(null)}
-                    className="w-full min-h-[44px] rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-sm transition-colors"
+                    onClick={onClose}
+                    className="w-full min-h-[46px] rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-sm transition-colors cursor-pointer"
                   >
-                    Mast! Wapas Chalo
+                    Back to Community
                   </button>
-                </div>
+                </motion.div>
               ) : (
                 <form onSubmit={handlePayWithRazorpay} className="space-y-4">
                   <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                    Server ka bill aur late-night coding dono chai-coffee ke bharose chal rahi hai.
-                    Agar app se thodi bhi help mili ho, toh Admin ko ek garma-garam chai ya coffee
-                    pila do!
+                    JEE Community will always remain free for every student. If this platform has
+                    helped you in your preparation and you&apos;d like to appreciate the work, you
+                    can optionally buy me a chai.
                   </p>
 
                   {/* Preset Chai Tier Cards */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                        Kya Pilaoge?
+                        Select a Chai
                       </span>
                       <button
                         type="button"
                         onClick={() => setIsCustomAmount((prev) => !prev)}
                         className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline whitespace-nowrap"
                       >
-                        {isCustomAmount ? 'Menu dekho' : 'Apni marzi se ₹ daalo'}
+                        {isCustomAmount ? 'Back to presets' : 'Custom amount'}
                       </button>
                     </div>
 
@@ -390,7 +407,7 @@ export default function BuyMeAChaiModal({
                                   : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-amber-300 dark:hover:border-amber-700'
                               }`}
                             >
-                              <span className="text-[11px] font-semibold whitespace-nowrap">
+                              <span className="text-xs font-semibold whitespace-nowrap">
                                 {tier.label}
                               </span>
                               <span className="text-base font-bold tabular-nums">
@@ -412,7 +429,7 @@ export default function BuyMeAChaiModal({
                           step={1}
                           value={customAmountInput}
                           onChange={(e) => setCustomAmountInput(e.target.value)}
-                          placeholder="Kitne rupay ki chai? (min ₹10)"
+                          placeholder="Enter amount (min ₹10)"
                           className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 pl-9 pr-4 py-2.5 text-sm font-semibold text-slate-900 dark:text-white outline-none focus:border-amber-500 tabular-nums"
                         />
                       </div>
@@ -423,27 +440,27 @@ export default function BuyMeAChaiModal({
                   <div className="space-y-3">
                     <div>
                       <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                        Tumhara Naam
+                        Your Name
                       </label>
                       <input
                         type="text"
                         maxLength={80}
                         value={supporterName}
                         onChange={(e) => setSupporterName(e.target.value)}
-                        placeholder="e.g. Future IITian / Aarav"
+                        placeholder="Enter your name"
                         className="w-full min-h-[42px] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-amber-500"
                       />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                        Koi Funny / Sweet Message (Optional)
+                        Leave a Note (Optional)
                       </label>
                       <textarea
                         rows={2}
                         maxLength={200}
                         value={message}
                         onChange={(e) => setMessage(e.target.value)}
-                        placeholder="e.g. Bhai mast app hai, lo chai piyo aur padhai karwao..."
+                        placeholder="Write a short note or wish..."
                         className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-amber-500 resize-none"
                       />
                     </div>
@@ -454,7 +471,7 @@ export default function BuyMeAChaiModal({
                     <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 p-3 flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200">
                       <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                       <div className="space-y-1">
-                        <p className="font-semibold">Chai Tapri Abhi Setup Ho Rahi Hai</p>
+                        <p className="font-semibold">Checkout Unavailable</p>
                         <p className="leading-relaxed opacity-90">{configError}</p>
                       </div>
                     </div>
@@ -469,13 +486,13 @@ export default function BuyMeAChaiModal({
                     {isProcessing ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Chai garam ho rahi hai...</span>
+                        <span>Opening checkout...</span>
                       </>
                     ) : (
                       <>
                         <Coffee className="w-4 h-4 shrink-0" />
                         <span className="tabular-nums">
-                          ₹{effectiveAmount > 0 ? effectiveAmount : 0} ki Chai Pila Do
+                          Buy a Chai · ₹{effectiveAmount > 0 ? effectiveAmount : 0}
                         </span>
                       </>
                     )}
@@ -483,7 +500,7 @@ export default function BuyMeAChaiModal({
 
                   <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <span>100% safe &amp; instant · Sidha Admin ke chai fund mein</span>
+                    <span>100% optional · Secured by Razorpay</span>
                   </div>
                 </form>
               )}
@@ -493,18 +510,18 @@ export default function BuyMeAChaiModal({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
                     <Heart className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                    <span>Chai Pilane Wale Legends</span>
+                    <span>Recent Supporters</span>
                   </div>
                   {totalCups > 0 && (
                     <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 tabular-nums">
-                      {totalCups} chai pilayi gayi
+                      {totalCups} chai shared
                     </span>
                   )}
                 </div>
 
                 {supporters.length === 0 ? (
                   <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
-                    Abhi kisi ne chai nahi pilayi... Pehle legend tum ban jao!
+                    No notes yet. Thank you for being part of JEE Community.
                   </p>
                 ) : (
                   <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
