@@ -21,19 +21,13 @@ import {
   deleteSupabaseAdminStatus,
   recordSupabaseStatusInteraction,
   createSupabaseNotification,
-  getInstantChaiSupporters,
-  fetchSupabaseChaiSupporters,
-  ChaiSupporterRecord,
 } from '../lib/supabaseHub';
-import BuyMeAChaiModal from './BuyMeAChaiModal';
+
+const BUY_ME_A_CHAI_URL = 'https://rzp.io/rzp/buy-me-a-chai-jee';
 
 export default function AdminStatusRow() {
   const { user, profile } = useAuth();
   const [statuses, setStatuses] = useState<any[]>(() => getInstantAdminStatuses());
-  const [supporters, setSupporters] = useState<ChaiSupporterRecord[]>(() =>
-    getInstantChaiSupporters()
-  );
-  const [isChaiModalOpen, setIsChaiModalOpen] = useState(false);
 
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -62,15 +56,9 @@ export default function AdminStatusRow() {
     setStatuses(list);
   }, []);
 
-  const fetchSupporters = useCallback(async (force = false) => {
-    const list = await fetchSupabaseChaiSupporters(force);
-    setSupporters(list);
-  }, []);
-
   useEffect(() => {
     fetchStatuses(false);
-    fetchSupporters(false);
-  }, [fetchStatuses, fetchSupporters]);
+  }, [fetchStatuses]);
 
   const checkVideoDuration = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
@@ -387,9 +375,10 @@ export default function AdminStatusRow() {
       ))}
 
       {/* Buy Me a Chai Card in the Empty Space Next to Status Circles */}
-      <button
-        type="button"
-        onClick={() => setIsChaiModalOpen(true)}
+      <a
+        href={BUY_ME_A_CHAI_URL}
+        target="_blank"
+        rel="noopener noreferrer"
         className={`${
           hasStatusItems ? 'ml-auto shrink-0' : 'w-full justify-between'
         } min-h-[52px] flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-50/80 dark:bg-amber-950/25 border border-amber-200/90 dark:border-amber-800/50 hover:border-amber-400 dark:hover:border-amber-600 transition-colors cursor-pointer group text-left`}
@@ -403,17 +392,7 @@ export default function AdminStatusRow() {
           </span>
         </div>
         <ChevronRight className="w-4 h-4 text-amber-700 dark:text-amber-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
-      </button>
-
-      {/* Buy Me a Chai Razorpay Modal */}
-      <BuyMeAChaiModal
-        isOpen={isChaiModalOpen}
-        onClose={() => setIsChaiModalOpen(false)}
-        supporters={supporters}
-        onSupportCompleted={(newRecord) => {
-          setSupporters((prev) => [newRecord, ...prev.filter((x) => x.id !== newRecord.id)]);
-        }}
-      />
+      </a>
 
       {/* Upload Preview & Link/Caption Modal */}
       <AnimatePresence>
