@@ -22,6 +22,12 @@
   force = true
 
 [[redirects]]
+  from = "/api/razorpay/*"
+  to = "/.netlify/functions/razorpay/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/api/*"
   to = "https://jee-community.onrender.com/api/:splat"
   status = 200

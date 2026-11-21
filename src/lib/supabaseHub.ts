@@ -1613,34 +1613,18 @@ export function subscribeSupabasePostComments(
 }
 
 // ============================================================================
-// 8. ADMIN STATUSES & DIWALI FESTIVE VIDEO STATUS (`admin_status` in Supabase)
+// 8. ADMIN STATUSES (`admin_status` in Supabase)
 // ============================================================================
 
-const FAST_STATUSES_CACHE_KEY = 'jee_hub_fast_admin_statuses_v1';
+const FAST_STATUSES_CACHE_KEY = 'jee_hub_fast_admin_statuses_v2';
 let statusesMemoryCache: any[] | null = null;
 let statusesLastFetchedAt = 0;
 
-export const DEFAULT_DIWALI_STATUS_ID = 'diwali_special_2026';
+const REMOVED_LEGACY_STATUS_IDS = new Set(['diwali_special_2026']);
 
-function createDefaultDiwaliStatus(overrides?: Partial<any>): any {
-  const createdMs = overrides?.createdAtMs || Date.now();
-  return {
-    id: DEFAULT_DIWALI_STATUS_ID,
-    type: 'diwali_video',
-    title: 'Happy Diwali to You & Your Family',
-    caption:
-      'Aap sabhi JEE Community members aur aapke poore parivaar ko Diwali ki dher saari shubhkamnayein! Yeh roshni ka tyohaar aapke ghar me khushiyan, sukh-shanti aur samriddhi le kar aaye. Happy Diwali!',
-    viewsCount: Math.max(Number(overrides?.viewsCount) || 48, 48),
-    wishesCount: Math.max(Number(overrides?.wishesCount) || 32, 32),
-    isHidden: Boolean(overrides?.isHidden),
-    authorId: 'admin',
-    createdAtMs: createdMs,
-    createdAt: {
-      toDate: () => new Date(createdMs),
-      toMillis: () => createdMs,
-    },
-    ...(overrides || {}),
-  };
+function isRemovedLegacyStatus(raw: any): boolean {
+  const id = String(raw?.id || '').replace(/^astatus_/, '');
+  return REMOVED_LEGACY_STATUS_IDS.has(id) || raw?.type === 'diwali_video';
 }
 
 function hydrateStatusItem(raw: any): any {
@@ -1664,22 +1648,26 @@ function hydrateStatusItem(raw: any): any {
 }
 
 export function getInstantAdminStatuses(): any[] {
-  if (statusesMemoryCache && statusesMemoryCache.length > 0) {
+  if (statusesMemoryCache) {
     return statusesMemoryCache;
   }
   try {
+    // Clear legacy v1 cache that held Diwali status
+    localStorage.removeItem('jee_hub_fast_admin_statuses_v1');
     const raw = localStorage.getItem(FAST_STATUSES_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        statusesMemoryCache = parsed.map(hydrateStatusItem);
+      if (Array.isArray(parsed)) {
+        statusesMemoryCache = parsed
+          .filter((item) => !isRemovedLegacyStatus(item))
+          .map(hydrateStatusItem);
         return statusesMemoryCache;
       }
     }
   } catch {
     // ignore
   }
-  return [createDefaultDiwaliStatus()];
+  return [];
 }
 
 function saveFastStatusesCache(list: any[]) {
@@ -1706,7 +1694,6 @@ export async function fetchSupabaseAdminStatuses(force = false): Promise<any[]> 
     `select=id,created_at,views,likes,comments&video_type=eq.admin_status&order=created_at.desc&limit=15`
   );
 
-  let diwaliOverride: any = null;
   const customStatuses: any[] = [];
 
   for (const row of rows) {
@@ -1720,29 +1707,14 @@ export async function fetchSupabaseAdminStatuses(force = false): Promise<any[]> 
       _rowLikes: row.likes,
       _rowCreatedAt: row.created_at,
     });
-    if (rawId === DEFAULT_DIWALI_STATUS_ID) {
-      diwaliOverride = hydrated;
-    } else if (!hydrated.isDeleted) {
-      customStatuses.push(hydrated);
+    if (isRemovedLegacyStatus(hydrated) || hydrated.isDeleted || hydrated.isHidden) {
+      continue;
     }
+    customStatuses.push(hydrated);
   }
 
-  const diwaliStatus = createDefaultDiwaliStatus(
-    diwaliOverride
-      ? {
-          ...diwaliOverride,
-          viewsCount: Math.max(Number(diwaliOverride.viewsCount) || 48, 48),
-          wishesCount: Math.max(Number(diwaliOverride.wishesCount) || 32, 32),
-        }
-      : undefined
-  );
-
-  const finalList = diwaliStatus.isHidden
-    ? customStatuses
-    : [diwaliStatus, ...customStatuses];
-
-  saveFastStatusesCache(finalList);
-  return finalList;
+  saveFastStatusesCache(customStatuses);
+  return customStatuses;
 }
 
 export async function saveSupabaseAdminStatus(statusData: any): Promise<any> {
@@ -1785,53 +1757,31 @@ export async function saveSupabaseAdminStatus(statusData: any): Promise<any> {
 
 export async function deleteSupabaseAdminStatus(statusId: string): Promise<void> {
   const rawId = String(statusId).replace(/^astatus_/, '');
-  if (rawId === DEFAULT_DIWALI_STATUS_ID) {
-    // Hide the built-in Diwali status if Admin explicitly deletes it
-    const current = getInstantAdminStatuses().find((s) => s.id === DEFAULT_DIWALI_STATUS_ID);
-    await saveSupabaseAdminStatus({
-      ...(current || createDefaultDiwaliStatus()),
-      id: DEFAULT_DIWALI_STATUS_ID,
-      isHidden: true,
-    });
-    return;
-  }
   await deleteHubRow(`astatus_${rawId}`);
   const currentList = getInstantAdminStatuses().filter((s) => s.id !== rawId);
   saveFastStatusesCache(currentList);
   emitHubSync('admin_status', rawId);
 }
 
-export async function restoreDefaultDiwaliStatus(): Promise<any> {
-  const existing = (await fetchSupabaseAdminStatuses(true)).find(
-    (s) => s.id === DEFAULT_DIWALI_STATUS_ID
-  );
-  return saveSupabaseAdminStatus({
-    ...createDefaultDiwaliStatus(existing),
-    id: DEFAULT_DIWALI_STATUS_ID,
-    isHidden: false,
-  });
-}
-
 export async function recordSupabaseStatusInteraction(
   statusItem: any,
   kind: 'view' | 'wish'
 ): Promise<{ viewsCount: number; wishesCount: number }> {
-  const rawId = String(statusItem?.id || DEFAULT_DIWALI_STATUS_ID).replace(/^astatus_/, '');
-  const nextViews =
-    (Number(statusItem?.viewsCount) || 48) + (kind === 'view' ? 1 : 0);
-  const nextWishes =
-    (Number(statusItem?.wishesCount) || 32) + (kind === 'wish' ? 1 : 0);
+  const rawId = String(statusItem?.id || '').replace(/^astatus_/, '');
+  if (!rawId) return { viewsCount: 1, wishesCount: 0 };
 
-  // Optimistically update memory & localStorage cache in 0ms
+  const nextViews =
+    (Number(statusItem?.viewsCount) || 1) + (kind === 'view' ? 1 : 0);
+  const nextWishes =
+    (Number(statusItem?.wishesCount) || 0) + (kind === 'wish' ? 1 : 0);
+
   const currentList = getInstantAdminStatuses().map((s) =>
     s.id === rawId ? { ...s, viewsCount: nextViews, wishesCount: nextWishes } : s
   );
   saveFastStatusesCache(currentList);
 
   const cleanPayload = {
-    ...(statusItem?.id === DEFAULT_DIWALI_STATUS_ID
-      ? createDefaultDiwaliStatus(statusItem)
-      : statusItem),
+    ...statusItem,
     id: rawId,
     viewsCount: nextViews,
     wishesCount: nextWishes,
@@ -1844,9 +1794,9 @@ export async function recordSupabaseStatusInteraction(
       recordType: 'admin_status',
       title: cleanPayload.title || cleanPayload.caption || 'Admin Status',
       description: cleanPayload.caption || '',
-      subject: cleanPayload.type || 'diwali_video',
+      subject: cleanPayload.type || 'image',
       chapter: 'status',
-      author_uid: 'admin',
+      author_uid: cleanPayload.authorId || 'admin',
       author_name: 'Admin',
       views: nextViews,
       likes: nextWishes,
@@ -1856,4 +1806,129 @@ export async function recordSupabaseStatusInteraction(
 
   return { viewsCount: nextViews, wishesCount: nextWishes };
 }
+
+// ============================================================================
+// 9. BUY ME A CHAI SUPPORTERS (`chai_support` in Supabase - 0 Firebase Reads)
+// ============================================================================
+
+export interface ChaiSupporterRecord {
+  id: string;
+  supporterName: string;
+  userId: string;
+  userAvatar?: string;
+  cups: number;
+  amountInr: number;
+  message?: string;
+  paymentId: string;
+  orderId: string;
+  createdAtMs: number;
+}
+
+const FAST_CHAI_CACHE_KEY = 'jee_hub_chai_supporters_v1';
+let chaiMemoryCache: ChaiSupporterRecord[] | null = null;
+let chaiLastFetchedAt = 0;
+
+export function getInstantChaiSupporters(): ChaiSupporterRecord[] {
+  if (chaiMemoryCache) return chaiMemoryCache;
+  try {
+    const raw = localStorage.getItem(FAST_CHAI_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        chaiMemoryCache = parsed;
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function saveFastChaiCache(list: ChaiSupporterRecord[]) {
+  chaiMemoryCache = list;
+  chaiLastFetchedAt = Date.now();
+  try {
+    localStorage.setItem(FAST_CHAI_CACHE_KEY, JSON.stringify(list));
+  } catch {
+    // ignore
+  }
+}
+
+export async function fetchSupabaseChaiSupporters(
+  force = false
+): Promise<ChaiSupporterRecord[]> {
+  if (!force && chaiMemoryCache && Date.now() - chaiLastFetchedAt < 20000) {
+    return chaiMemoryCache;
+  }
+
+  const rows = await queryHubRows(
+    `select=id,created_at,views,likes,comments&video_type=eq.chai_support&order=created_at.desc&limit=50`
+  );
+
+  const list: ChaiSupporterRecord[] = [];
+  for (const row of rows) {
+    const decoded = decodeHubPayload(row);
+    if (!decoded) continue;
+    const ms =
+      typeof decoded.createdAtMs === 'number'
+        ? decoded.createdAtMs
+        : row.created_at
+        ? new Date(row.created_at).getTime()
+        : Date.now();
+    list.push({
+      id: decoded.id || String(row.id).replace(/^chai_/, ''),
+      supporterName: decoded.supporterName || 'JEE Student',
+      userId: decoded.userId || 'guest',
+      userAvatar: decoded.userAvatar || '',
+      cups: Math.max(1, Number(decoded.cups) || 1),
+      amountInr: Math.max(1, Number(decoded.amountInr) || 19),
+      message: decoded.message || '',
+      paymentId: decoded.paymentId || '',
+      orderId: decoded.orderId || '',
+      createdAtMs: ms,
+    });
+  }
+
+  saveFastChaiCache(list);
+  return list;
+}
+
+export async function saveSupabaseChaiSupport(
+  record: Omit<ChaiSupporterRecord, 'id' | 'createdAtMs'>
+): Promise<ChaiSupporterRecord> {
+  const rawId = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const createdAtMs = Date.now();
+  const fullRecord: ChaiSupporterRecord = {
+    ...record,
+    id: rawId,
+    createdAtMs,
+  };
+
+  await upsertHubRow(
+    encodeHubRow({
+      id: `chai_${rawId}`,
+      recordType: 'chai_support',
+      title: `${fullRecord.supporterName} bought ${fullRecord.cups} Chai`,
+      description: fullRecord.message || '',
+      subject: 'razorpay',
+      chapter: 'chai_support',
+      author_uid: fullRecord.userId || 'guest',
+      author_name: fullRecord.supporterName,
+      views: fullRecord.amountInr,
+      likes: fullRecord.cups,
+      payload: fullRecord,
+      created_at: new Date(createdAtMs).toISOString(),
+    })
+  );
+
+  const updated = [fullRecord, ...getInstantChaiSupporters().filter((x) => x.id !== rawId)].slice(
+    0,
+    50
+  );
+  saveFastChaiCache(updated);
+  emitHubSync('chai_support', rawId);
+  return fullRecord;
+}
+
 

@@ -2,6 +2,7 @@ import express from "express";
 import { assistantRouter } from "./assistant-api";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { google } from "googleapis";
@@ -1261,6 +1262,159 @@ Generate the complete, rich, interactive feature configuration JSON now.`;
   } catch (err: any) {
     console.error('Sandbox AI Builder error:', err?.message || err);
     return res.status(500).json({ error: 'Fallback to smart builder' });
+  }
+});
+
+// ============================================================================
+// RAZORPAY PAYMENT ROUTES (Buy Me a Chai - Server-Side Order & HMAC Verify)
+// ============================================================================
+function getRazorpayKeys() {
+  const clean = (v?: string) => String(v || "").replace(/^["']|["']$/g, "").trim();
+  const keyId = clean(process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID);
+  const keySecret = clean(process.env.RAZORPAY_KEY_SECRET);
+  return { keyId, keySecret };
+}
+
+app.get("/api/razorpay/config", (_req, res) => {
+  const { keyId, keySecret } = getRazorpayKeys();
+  res.json({
+    configured: Boolean(keyId && keySecret),
+    keyId: keyId || null,
+    mode: keyId.startsWith("rzp_live_")
+      ? "live"
+      : keyId.startsWith("rzp_test_")
+      ? "test"
+      : null,
+  });
+});
+
+app.post("/api/razorpay/create-order", async (req, res) => {
+  const { keyId, keySecret } = getRazorpayKeys();
+  if (!keyId || !keySecret) {
+    return res.status(503).json({
+      error: "RAZORPAY_NOT_CONFIGURED",
+      message:
+        "Razorpay API keys abhi configure nahi hain. Environment variables mein RAZORPAY_KEY_ID aur RAZORPAY_KEY_SECRET add karein.",
+    });
+  }
+
+  try {
+    const amountInr = Number(req.body?.amount);
+    if (!Number.isFinite(amountInr) || amountInr < 10 || amountInr > 50000) {
+      return res.status(400).json({
+        error: "INVALID_AMOUNT",
+        message: "Amount ₹10 se ₹50,000 ke beech hona chahiye.",
+      });
+    }
+
+    const amountPaise = Math.round(amountInr * 100);
+    const supporterName = String(req.body?.supporterName || "JEE Student").slice(0, 80);
+    const cups = Math.max(1, Math.min(500, Math.round(Number(req.body?.cups) || 1)));
+    const message = String(req.body?.message || "").slice(0, 200);
+    const userId = String(req.body?.userId || "guest").slice(0, 80);
+    const receipt = `chai_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`.slice(0, 40);
+
+    const authHeader = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+    const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${authHeader}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: amountPaise,
+        currency: "INR",
+        receipt,
+        notes: {
+          app: "JEE Community",
+          type: "buy_me_a_chai",
+          supporterName,
+          cups: String(cups),
+          message,
+          userId,
+        },
+      }),
+    });
+
+    const rzpData: any = await rzpRes.json().catch(() => ({}));
+    if (!rzpRes.ok || !rzpData?.id) {
+      return res.status(rzpRes.status >= 400 ? rzpRes.status : 502).json({
+        error: "RAZORPAY_ORDER_FAILED",
+        message:
+          rzpData?.error?.description ||
+          "Razorpay order create nahi ho paya. Kripya apni API keys verify karein.",
+      });
+    }
+
+    return res.json({
+      orderId: rzpData.id,
+      amount: rzpData.amount,
+      currency: rzpData.currency || "INR",
+      keyId,
+    });
+  } catch (err: any) {
+    console.error("Razorpay create-order error:", err?.message || err);
+    return res.status(500).json({
+      error: "SERVER_ERROR",
+      message: err?.message || "Order create karte waqt error aa gaya.",
+    });
+  }
+});
+
+app.post("/api/razorpay/verify", (req, res) => {
+  const { keyId, keySecret } = getRazorpayKeys();
+  if (!keyId || !keySecret) {
+    return res.status(503).json({
+      verified: false,
+      error: "RAZORPAY_NOT_CONFIGURED",
+      message: "Razorpay secret key server par set nahi hai.",
+    });
+  }
+
+  try {
+    const orderId = String(req.body?.razorpay_order_id || "").trim();
+    const paymentId = String(req.body?.razorpay_payment_id || "").trim();
+    const signature = String(req.body?.razorpay_signature || "").trim();
+
+    if (!orderId || !paymentId || !signature) {
+      return res.status(400).json({
+        verified: false,
+        error: "MISSING_FIELDS",
+        message: "Payment verification fields incomplete hain.",
+      });
+    }
+
+    const expectedSignature = crypto
+      .createHmac("sha256", keySecret)
+      .update(`${orderId}|${paymentId}`)
+      .digest("hex");
+
+    const expectedBuf = Buffer.from(expectedSignature, "utf8");
+    const actualBuf = Buffer.from(signature, "utf8");
+    const isValid =
+      expectedBuf.length === actualBuf.length &&
+      crypto.timingSafeEqual(expectedBuf, actualBuf);
+
+    if (!isValid) {
+      return res.status(400).json({
+        verified: false,
+        error: "INVALID_SIGNATURE",
+        message: "Payment signature verify nahi ho paya.",
+      });
+    }
+
+    return res.json({
+      verified: true,
+      orderId,
+      paymentId,
+    });
+  } catch (err: any) {
+    console.error("Razorpay verify error:", err?.message || err);
+    return res.status(500).json({
+      verified: false,
+      error: "VERIFY_ERROR",
+      message: err?.message || "Payment verification failed.",
+    });
   }
 });
 
