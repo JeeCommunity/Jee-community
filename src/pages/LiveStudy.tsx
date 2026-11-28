@@ -25,6 +25,7 @@ import {
   saveSupabaseStudySession,
   fetchAllSupabaseStudySessions,
   getCachedUserProfile,
+  generateFallbackAvatarDataUrl,
 } from "../lib/supabaseHub";
 import { useAuth } from "../AuthContext";
 import {
@@ -1168,7 +1169,19 @@ export default function LiveStudy() {
                         idx === 1 ? "border-[3px] border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800" :
                         idx === 2 ? "border-[3px] border-orange-400 text-orange-600 bg-orange-100" :
                         "border-2 border-slate-200 dark:border-slate-700 text-indigo-600 bg-indigo-50")}>
-                       {(s.photoURL || s.userPhoto) ? <img src={s.photoURL || s.userPhoto} alt={s.fullName || s.userName} className="w-full h-full object-cover" /> : getFirstName(s.fullName || s.userName || "Unknown User").charAt(0).toUpperCase()}
+                       {(s.photoURL || s.userPhoto) ? (
+                         <img
+                           src={s.photoURL || s.userPhoto}
+                           alt={s.fullName || s.userName}
+                           onError={(e) => {
+                             e.currentTarget.onerror = null;
+                             e.currentTarget.src = generateFallbackAvatarDataUrl(s.fullName || s.userName);
+                           }}
+                           className="w-full h-full object-cover"
+                         />
+                       ) : (
+                         getFirstName(s.fullName || s.userName || "Unknown User").charAt(0).toUpperCase()
+                       )}
                      </div>
                      {s.isStudying && (
                        <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full z-10"></span>

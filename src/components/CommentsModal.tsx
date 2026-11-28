@@ -32,6 +32,7 @@ import {
   updateSupabaseCommunityPost,
   getCachedUserProfile,
   getInstantCachedUserProfile,
+  generateFallbackAvatarDataUrl,
 } from '../lib/supabaseHub';
 
 interface Comment {
@@ -725,7 +726,15 @@ const CommentItem: React.FC<CommentItemProps> = ({ comment, post, onReply }) => 
     <div className="flex space-x-3">
       <button onClick={() => setShowProfileModal(true)} className="shrink-0 focus:outline-none transition-transform hover:scale-105 active:scale-95 relative">
         {author?.photoURL ? (
-          <img src={author.photoURL} alt={getFirstName(author.fullName)} className={`w-8 h-8 rounded-full object-cover ${author?.role === "admin" ? "border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : ""}`} />
+          <img
+            src={author.photoURL}
+            alt={getFirstName(author.fullName)}
+            onError={(e) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = generateFallbackAvatarDataUrl(author?.fullName);
+            }}
+            className={`w-8 h-8 rounded-full object-cover ${author?.role === "admin" ? "border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : ""}`}
+          />
         ) : (
           <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shadow-sm ${author?.role === "admin" ? "bg-blue-100 text-blue-700 border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : "bg-blue-100 text-blue-700 border border-blue-200"}`}>
             {getFirstName(author?.fullName)?.[0]?.toUpperCase() || 'U'}

@@ -6,6 +6,7 @@ import { Building2, Zap } from "lucide-react";
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { renderTextWithLinks } from '../lib/linkify';
+import { generateFallbackAvatarDataUrl } from '../lib/supabaseHub';
 
 interface UserProfileModalProps {
   user: any;
@@ -230,7 +231,15 @@ export default function UserProfileModal({ user, session: initialSession, onClos
           <div className={`flex justify-center ${isExpanded ? '-mt-16' : '-mt-10'} mb-3 relative z-10 transition-all duration-300 shrink-0`}>
             <div className="relative">
               {user.photoURL ? (
-                <img src={user.photoURL} alt={getFirstName(user.fullName)} className={`${isExpanded ? 'w-32 h-32' : 'w-20 h-20'} rounded-full object-cover border-4 border-white shadow-md bg-white dark:bg-slate-900 transition-all duration-300`} />
+                <img
+                  src={user.photoURL}
+                  alt={getFirstName(user.fullName)}
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = generateFallbackAvatarDataUrl(user.fullName);
+                  }}
+                  className={`${isExpanded ? 'w-32 h-32' : 'w-20 h-20'} rounded-full object-cover border-4 border-white shadow-md bg-white dark:bg-slate-900 transition-all duration-300`}
+                />
               ) : (
                 <div className={`${isExpanded ? 'w-32 h-32 text-4xl' : 'w-20 h-20 text-3xl'} rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold border-4 border-white shadow-md transition-all duration-300`}>
                   {getFirstName(user.fullName)?.[0]?.toUpperCase() || 'U'}

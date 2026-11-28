@@ -17,7 +17,7 @@ import NotesHubAnnouncementModal from './NotesHubAnnouncementModal';
 import MyNotesAnnouncementModal from './MyNotesAnnouncementModal';
 import { getFirstName, getLocalDate } from '../lib/utils';
 import { getCampusProgress, getDailyCoins, getDailyXP } from '../lib/campusEconomy';
-import { subscribeSupabaseStudySessions, getCachedUserProfile } from '../lib/supabaseHub';
+import { subscribeSupabaseStudySessions, getCachedUserProfile, generateFallbackAvatarDataUrl } from '../lib/supabaseHub';
 import { useTheme } from '../ThemeContext';
 
 export default function Layout() {
@@ -374,7 +374,15 @@ export default function Layout() {
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                 >
                   {profile?.photoURL ? (
-                    <img src={profile.photoURL} alt={profile.fullName} className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700" />
+                    <img
+                      src={profile.photoURL}
+                      alt={profile.fullName}
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = generateFallbackAvatarDataUrl(profile?.fullName);
+                      }}
+                      className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700"
+                    />
                   ) : (
                     <div className="w-8 h-8 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 font-medium text-xs">
                       {getFirstName(profile?.fullName)?.[0]?.toUpperCase() || <UserIcon className="w-4 h-4" />}
@@ -560,7 +568,15 @@ export default function Layout() {
               {profile && (
                 <div className="px-4 pb-4 mb-4 border-b border-slate-100 dark:border-slate-800 flex items-center space-x-3">
                   {profile.photoURL ? (
-                    <img src={profile.photoURL} alt={profile.fullName} className="w-12 h-12 rounded-full object-cover border border-slate-200 dark:border-slate-700" />
+                    <img
+                      src={profile.photoURL}
+                      alt={profile.fullName}
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = generateFallbackAvatarDataUrl(profile?.fullName);
+                      }}
+                      className="w-12 h-12 rounded-full object-cover border border-slate-200 dark:border-slate-700"
+                    />
                   ) : (
                     <div className="w-12 h-12 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 font-bold text-lg">
                       {getFirstName(profile.fullName)?.[0]?.toUpperCase() || <UserIcon className="w-6 h-6" />}

@@ -53,14 +53,43 @@ const notesMemoryCache = new Map<string, any[]>();
 const notifsMemoryCache = new Map<string, any[]>();
 
 /**
- * Prevents raw multi-kilobyte base64 strings from bloating Supabase JSON rows.
+ * Returns true if an image URL points to the primary Supabase storage bucket that hit free-tier egress quota.
+ */
+export function isRestrictedSupabaseStorageUrl(url?: string | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  return url.includes('siudeeqkpljaxgivnydh.supabase.co/storage/');
+}
+
+/**
+ * Generates a crisp, self-contained SVG initial avatar data URL when an external DP fails to load.
+ */
+export function generateFallbackAvatarDataUrl(name?: string | null): string {
+  const cleanName = String(name || 'U').replace(/[^\p{L}\p{N}\s]/gu, '').trim() || String(name || 'U').trim();
+  const initial = (cleanName.charAt(0) || 'U').toUpperCase();
+  const colors = ['#4F46E5', '#2563EB', '#0D9488', '#7C3AED', '#EA580C', '#0284C7', '#16A34A'];
+  let hash = 0;
+  for (let i = 0; i < cleanName.length; i++) {
+    hash = cleanName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const bg = colors[Math.abs(hash) % colors.length];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" rx="60" fill="${bg}"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="700">${initial}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/**
+ * Sanitizes photo URLs:
+ * - Blocks dead/quota-exceeded primary Supabase storage URLs so broken image icons never appear
+ * - Allows compressed data:image/ URLs up to 180 KB so Firestore/compressed DPs are preserved
  */
 function sanitizePhotoUrl(photo?: string | null): string {
   if (!photo || typeof photo !== 'string') return '';
-  if (photo.startsWith('data:image/') && photo.length > 1800) {
+  const trimmed = photo.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return '';
+  if (isRestrictedSupabaseStorageUrl(trimmed)) return '';
+  if (trimmed.startsWith('data:image/') && trimmed.length > 180000) {
     return '';
   }
-  return photo;
+  return trimmed;
 }
 
 // Primary <-> Fallback routing is handled centrally by supabaseFetchWithFailover in ./edutube.
@@ -203,13 +232,20 @@ export async function queryHubRows(queryString: string): Promise<any[]> {
 export function getInstantCachedUserProfile(uid: string): any | null {
   if (!uid) return null;
   if (profileMemoryCache.has(uid)) {
-    return profileMemoryCache.get(uid);
+    const mem = profileMemoryCache.get(uid);
+    if (mem && mem.photoURL && isRestrictedSupabaseStorageUrl(mem.photoURL)) {
+      mem.photoURL = '';
+    }
+    return mem;
   }
   try {
     const localRaw = localStorage.getItem(`jee_uprofile_${uid}`);
     if (localRaw) {
       const parsed = JSON.parse(localRaw);
       if (parsed) {
+        if (parsed.photoURL && isRestrictedSupabaseStorageUrl(parsed.photoURL)) {
+          parsed.photoURL = '';
+        }
         profileMemoryCache.set(uid, parsed);
         return parsed;
       }
@@ -223,7 +259,12 @@ export function getInstantCachedUserProfile(uid: string): any | null {
 export async function getCachedUserProfile(uid: string): Promise<any | null> {
   if (!uid) return null;
   const instant = getInstantCachedUserProfile(uid);
-  if (instant && Date.now() - (instant._cachedAt || 0) < 12 * 3600 * 1000) {
+  // Only return instant cache early if it actually has a valid photoURL or was verified from Firestore recently
+  if (
+    instant &&
+    (instant.photoURL || instant._fbChecked) &&
+    Date.now() - (instant._cachedAt || 0) < 12 * 3600 * 1000
+  ) {
     return instant._notFound ? null : instant;
   }
 
@@ -232,6 +273,7 @@ export async function getCachedUserProfile(uid: string): Promise<any | null> {
 
   const fetchPromise = (async () => {
     try {
+      let supaProfile: any = null;
       const rows = await queryHubRows(
         `select=id,created_at,comments&id=eq.${encodeURIComponent(`uprofile_${uid}`)}&limit=1`
       );
@@ -239,33 +281,37 @@ export async function getCachedUserProfile(uid: string): Promise<any | null> {
         const decoded = decodeHubPayload(rows[0]);
         if (decoded) {
           decoded.photoURL = sanitizePhotoUrl(decoded.photoURL);
-          const withTs = { ...decoded, _cachedAt: Date.now() };
-          profileMemoryCache.set(uid, withTs);
-          try {
-            localStorage.setItem(`jee_uprofile_${uid}`, JSON.stringify(withTs));
-          } catch {
-            // ignore
+          supaProfile = decoded;
+          if (supaProfile.photoURL) {
+            const withTs = { ...supaProfile, _cachedAt: Date.now() };
+            profileMemoryCache.set(uid, withTs);
+            try {
+              localStorage.setItem(`jee_uprofile_${uid}`, JSON.stringify(withTs));
+            } catch {
+              // ignore
+            }
+            return supaProfile;
           }
-          return decoded;
         }
       }
 
-      // 3rd Tier Fallback: Existing Firebase Firestore `users/{uid}` collection (`community-6fe4e`)
+      // 3rd Tier Fallback / Photo Recovery: Existing Firebase Firestore `users/{uid}` collection (`community-6fe4e`)
       try {
         const userSnap = await getDoc(doc(db, 'users', uid));
         if (userSnap.exists()) {
           const fbData = userSnap.data();
           const clean = {
+            ...(supaProfile || {}),
             uid,
-            fullName: fbData.fullName || fbData.name || 'Student',
-            username: fbData.username || 'student',
-            photoURL: sanitizePhotoUrl(fbData.photoURL || fbData.avatar || ''),
-            role: fbData.role || 'user',
-            targetExam: fbData.targetExam || 'JEE',
+            fullName: fbData.fullName || fbData.name || supaProfile?.fullName || 'Student',
+            username: fbData.username || supaProfile?.username || 'student',
+            photoURL: sanitizePhotoUrl(fbData.photoURL || fbData.avatar || supaProfile?.photoURL || ''),
+            role: fbData.role || supaProfile?.role || 'user',
+            targetExam: fbData.targetExam || supaProfile?.targetExam || 'JEE',
             cheersEnabled: fbData.cheersEnabled !== false,
-            campus: fbData.campus || { totalCoins: 0, totalXP: 0 },
+            campus: fbData.campus || supaProfile?.campus || { totalCoins: 0, totalXP: 0 },
           };
-          const withTs = { ...clean, _cachedAt: Date.now() };
+          const withTs = { ...clean, _cachedAt: Date.now(), _fbChecked: true };
           profileMemoryCache.set(uid, withTs);
           try {
             localStorage.setItem(`jee_uprofile_${uid}`, JSON.stringify(withTs));
@@ -278,8 +324,21 @@ export async function getCachedUserProfile(uid: string): Promise<any | null> {
         // ignore if unauthenticated or offline
       }
 
+      if (supaProfile) {
+        const withTs = { ...supaProfile, _cachedAt: Date.now(), _fbChecked: true };
+        profileMemoryCache.set(uid, withTs);
+        try {
+          localStorage.setItem(`jee_uprofile_${uid}`, JSON.stringify(withTs));
+        } catch {
+          // ignore
+        }
+        return supaProfile;
+      }
+
       // Negative cache for 15 minutes so missing profiles don't trigger repeated network requests
-      const fallbackEntry = instant || { _notFound: true, _cachedAt: Date.now() };
+      const fallbackEntry = instant
+        ? { ...instant, _fbChecked: true, _cachedAt: Date.now() }
+        : { _notFound: true, _fbChecked: true, _cachedAt: Date.now() };
       profileMemoryCache.set(uid, fallbackEntry);
       return instant && !instant._notFound ? instant : null;
     } finally {
@@ -1486,8 +1545,8 @@ export async function fetchSupabaseCommunityPosts(forceNetwork = false): Promise
     );
   }
 
-  // 3rd Tier Fallback: Existing Firebase Firestore `posts` collection (`community-6fe4e`)
-  if (postsMap.size === 0 && areAllSupabaseEndpointsUnhealthy()) {
+  // 3rd Tier Fallback & Photo Enrichment: Existing Firebase Firestore `posts` collection (`community-6fe4e`)
+  if (postsMap.size === 0 || areAllSupabaseEndpointsUnhealthy()) {
     try {
       const fbSnap = await getDocs(
         query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(35))
@@ -1499,14 +1558,14 @@ export async function fetchSupabaseCommunityPosts(forceNetwork = false): Promise
         rawDocs.push({ id: docSnap.id, data: d });
       });
 
-      // Enrich missing author profiles from cached/Firestore `users/{authorId}`
       await Promise.all(
         rawDocs.map(async ({ id, data }) => {
-          let authorName = data.authorName;
-          let authorUsername = data.authorUsername;
-          let authorPhoto = data.authorPhoto;
-          if ((!authorName || !authorUsername) && data.authorId) {
-            const prof = await getCachedUserProfile(data.authorId);
+          const existingPost = postsMap.get(id);
+          let authorName = data.authorName || existingPost?.authorName;
+          let authorUsername = data.authorUsername || existingPost?.authorUsername;
+          let authorPhoto = sanitizePhotoUrl(data.authorPhoto || existingPost?.authorPhoto);
+          if ((!authorName || !authorUsername || !authorPhoto) && (data.authorId || existingPost?.authorId)) {
+            const prof = await getCachedUserProfile(data.authorId || existingPost?.authorId);
             if (prof) {
               authorName = authorName || prof.fullName || prof.username || 'Student';
               authorUsername = authorUsername || prof.username || 'student';
@@ -1516,6 +1575,7 @@ export async function fetchSupabaseCommunityPosts(forceNetwork = false): Promise
           postsMap.set(
             id,
             hydratePostTimestamps({
+              ...(existingPost || {}),
               ...data,
               id,
               authorName: authorName || 'Student',

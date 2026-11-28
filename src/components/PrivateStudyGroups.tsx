@@ -19,6 +19,7 @@ import {
   updateSupabaseGroupMessage,
   subscribeSupabaseGroupMessages,
   getCachedUserProfile,
+  generateFallbackAvatarDataUrl,
 } from '../lib/supabaseHub';
 
 interface PrivateStudyGroupsProps {
@@ -673,7 +674,19 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
                                       
                                       {!isMe && showAvatar ? (
                                          <div className="w-8 h-8 rounded-full bg-slate-200 overflow-hidden shrink-0 border border-white shadow-sm mb-1">
-                                            {msg.userPhoto ? <img src={msg.userPhoto} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500 text-xs">{msg.userName.charAt(0).toUpperCase()}</div>}
+                                            {msg.userPhoto ? (
+                                              <img
+                                                src={msg.userPhoto}
+                                                alt={msg.userName}
+                                                onError={(e) => {
+                                                  e.currentTarget.onerror = null;
+                                                  e.currentTarget.src = generateFallbackAvatarDataUrl(msg.userName);
+                                                }}
+                                                className="w-full h-full object-cover"
+                                              />
+                                            ) : (
+                                              <div className="w-full h-full flex items-center justify-center font-bold text-slate-500 text-xs">{msg.userName.charAt(0).toUpperCase()}</div>
+                                            )}
                                          </div>
                                       ) : !isMe ? (
                                          <div className="w-8 shrink-0"></div>
@@ -909,7 +922,19 @@ export default function PrivateStudyGroups({ sessions, usersData, getSessionTime
                              <div key={s.id} onClick={() => handleUserClick(s.id)} className="bg-white border border-slate-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:border-blue-200 hover:shadow-sm transition-all group">
                                 <div className="relative shrink-0">
                                    <div className="w-14 h-14 rounded-full overflow-hidden shadow-sm border-2 border-white bg-slate-100">
-                                      {(s.photoURL || s.userPhoto) ? <img src={s.photoURL || s.userPhoto} alt={s.fullName || s.userName} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500 text-xl">{getFirstName(s.fullName || s.userName || "U").charAt(0).toUpperCase()}</div>}
+                                      {(s.photoURL || s.userPhoto) ? (
+                                        <img
+                                          src={s.photoURL || s.userPhoto}
+                                          alt={s.fullName || s.userName}
+                                          onError={(e) => {
+                                            e.currentTarget.onerror = null;
+                                            e.currentTarget.src = generateFallbackAvatarDataUrl(s.fullName || s.userName);
+                                          }}
+                                          className="w-full h-full object-cover"
+                                        />
+                                      ) : (
+                                        <div className="w-full h-full flex items-center justify-center font-bold text-slate-500 text-xl">{getFirstName(s.fullName || s.userName || "U").charAt(0).toUpperCase()}</div>
+                                      )}
                                    </div>
                                 </div>
                                 <div className="flex-1 min-w-0">

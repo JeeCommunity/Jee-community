@@ -1,6 +1,6 @@
 import { storage } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { uploadMediaToEduTubeCloud } from './edutube';
+import { uploadMediaToEduTubeCloud, areAllSupabaseEndpointsUnhealthy } from './edutube';
 
 export interface UploadOptions {
   maxDimension?: number;
@@ -88,28 +88,7 @@ export const uploadFileToCloudinary = async (
     }
   }
 
-  // 1. Primary Cloud Storage: Supabase Storage (`edutube-media` public bucket)
-  try {
-    const targetBlob = compressedData ? compressedData.blob : file;
-    const ext = isImage ? 'jpg' : file.name.split('.').pop() || 'bin';
-    const baseName = file.name.replace(/\.[^/.]+$/, '').slice(0, 40) || 'file';
-    const fileName = `${baseName}.${ext}`;
-    const folder = options?.folder || (file.type === 'application/pdf' ? 'notes' : 'uploads');
-
-    const uploaded = await uploadMediaToEduTubeCloud(
-      targetBlob,
-      fileName,
-      folder,
-      options?.onProgress
-    );
-    if (uploaded?.url) {
-      return uploaded.url;
-    }
-  } catch (supaErr) {
-    console.warn('Supabase Storage upload fallback:', supaErr);
-  }
-
-  // 2. Secondary Cloud Storage: Cloudinary (if configured)
+  // 1. Primary Cloud Storage: Cloudinary (if configured)
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
   const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
   if (cloudName && uploadPreset) {
@@ -128,6 +107,7 @@ export const uploadFileToCloudinary = async (
 
       if (response.ok) {
         const data = await response.json();
+        if (options?.onProgress) options.onProgress(100);
         return data.secure_url;
       }
     } catch (error) {
@@ -135,28 +115,55 @@ export const uploadFileToCloudinary = async (
     }
   }
 
-  // 3. Fallback to Firebase Storage with a short timeout (4 seconds)
+  // 2. Secondary Cloud Storage: Supabase Storage (only if a healthy Supabase endpoint is available)
+  if (!areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      const targetBlob = compressedData ? compressedData.blob : file;
+      const ext = isImage ? 'jpg' : file.name.split('.').pop() || 'bin';
+      const baseName = file.name.replace(/\.[^/.]+$/, '').slice(0, 40) || 'file';
+      const fileName = `${baseName}.${ext}`;
+      const folder = options?.folder || (file.type === 'application/pdf' ? 'notes' : 'uploads');
+
+      const uploaded = await uploadMediaToEduTubeCloud(
+        targetBlob,
+        fileName,
+        folder,
+        options?.onProgress
+      );
+      if (uploaded?.url) {
+        return uploaded.url;
+      }
+    } catch (supaErr) {
+      console.warn('Supabase Storage upload fallback to Firebase Storage:', supaErr);
+    }
+  }
+
+  // 3. Fallback to Firebase Storage (`community-6fe4e`) with 15s timeout
   try {
     const uploadPromise = async () => {
       const ext = isImage ? 'jpg' : file.name.split('.').pop() || 'bin';
+      const folder = options?.folder || (file.type === 'application/pdf' ? 'notes' : 'uploads');
       const storageRef = ref(
         storage,
-        `uploads/${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`
+        `${folder}/${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`
       );
       const snapshot = await uploadBytes(
         storageRef,
         compressedData ? compressedData.blob : file
       );
-      return await getDownloadURL(snapshot.ref);
+      const url = await getDownloadURL(snapshot.ref);
+      if (options?.onProgress) options.onProgress(100);
+      return url;
     };
 
     const timeoutPromise = new Promise<string>((_, reject) =>
-      setTimeout(() => reject(new Error('Firebase Storage timeout')), 4000)
+      setTimeout(() => reject(new Error('Firebase Storage timeout')), 15000)
     );
 
     return await Promise.race([uploadPromise(), timeoutPromise]);
   } catch {
     if (compressedData?.dataUrl) {
+      if (options?.onProgress) options.onProgress(100);
       return compressedData.dataUrl;
     }
 
@@ -164,6 +171,7 @@ export const uploadFileToCloudinary = async (
       const reader = new FileReader();
       reader.onloadend = () => {
         if (typeof reader.result === 'string') {
+          if (options?.onProgress) options.onProgress(100);
           resolve(reader.result);
         } else {
           reject(new Error('Failed to convert file to Base64'));

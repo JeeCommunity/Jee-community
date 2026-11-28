@@ -20,6 +20,7 @@ import {
   deleteSupabaseCommunityPost,
   getCachedUserProfile,
   getInstantCachedUserProfile,
+  generateFallbackAvatarDataUrl,
 } from '../lib/supabaseHub';
 
 interface PostCardProps {
@@ -455,7 +456,15 @@ export default function PostCard({ post, onDelete, initialShowComments = false }
           <div className="flex items-center space-x-3">
             <button onClick={() => setShowProfileModal(true)} className="shrink-0 focus:outline-none transition-transform hover:scale-105 active:scale-95 relative">
               {author?.photoURL ? (
-                <img src={author.photoURL} alt={getFirstName(author.fullName)} className={`w-10 h-10 rounded-full object-cover ${author?.role === "admin" ? "border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : author?.role === "community_manager" ? "border-[2px] border-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" : "border border-slate-200 dark:border-slate-700"}`} />
+                <img
+                  src={author.photoURL}
+                  alt={getFirstName(author.fullName)}
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = generateFallbackAvatarDataUrl(author?.fullName || post.authorName);
+                  }}
+                  className={`w-10 h-10 rounded-full object-cover ${author?.role === "admin" ? "border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : author?.role === "community_manager" ? "border-[2px] border-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" : "border border-slate-200 dark:border-slate-700"}`}
+                />
               ) : (
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shadow-sm ${author?.role === "admin" ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-[2px] border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : author?.role === "community_manager" ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-[2px] border-emerald-500" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"}`}>
                   {getFirstName(author?.fullName)?.[0]?.toUpperCase() || 'U'}
@@ -721,7 +730,15 @@ export default function PostCard({ post, onDelete, initialShowComments = false }
               
               {post.images && post.images.length > 0 && (
                 <div className="mt-3 relative w-full h-80 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 cursor-pointer group" onClick={() => setSelectedImageIndex(0)}>
-                  <img src={post.images[0]} alt="Post attachment" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]" />
+                  <img
+                    src={post.images[0]}
+                    alt="Post attachment"
+                    onError={(e) => {
+                      const parent = e.currentTarget.parentElement;
+                      if (parent) parent.style.display = 'none';
+                    }}
+                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                  />
                   {post.images.length > 1 && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <span className="text-white font-bold text-lg bg-black/50 px-4 py-2 rounded-full backdrop-blur-sm">
