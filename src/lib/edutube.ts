@@ -1,3 +1,6 @@
+import { storage } from '../firebase';
+import { ref as firebaseStorageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+
 export type VideoFormat = 'long' | 'short' | 'live';
 export type StorageProviderType = 'supabase' | 'imagekit' | 'external' | 'local';
 
@@ -322,9 +325,194 @@ export function saveCloudConfig(config: EduTubeCloudConfig): void {
   localStorage.setItem(LOCAL_CONFIG_KEY, JSON.stringify(normalized));
 }
 
-export function isSupabaseConfigured(): boolean {
+export interface SupabaseEndpoint {
+  url: string;
+  anonKey: string;
+  label: 'primary' | 'fallback';
+}
+
+const ENDPOINT_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes cooldown after 402/429/5xx/network failure
+const ENDPOINT_COOLDOWN_STORAGE_KEY = 'jee_supabase_cooldowns_v1';
+const endpointCooldownMap = new Map<string, number>();
+
+function loadCooldownsFromStorage() {
+  try {
+    const raw = sessionStorage.getItem(ENDPOINT_COOLDOWN_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, number>;
+    const now = Date.now();
+    for (const [url, until] of Object.entries(parsed)) {
+      if (typeof until === 'number' && until > now) {
+        endpointCooldownMap.set(url, until);
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+loadCooldownsFromStorage();
+
+function persistCooldowns() {
+  try {
+    const obj: Record<string, number> = {};
+    const now = Date.now();
+    endpointCooldownMap.forEach((until, url) => {
+      if (until > now) obj[url] = until;
+    });
+    sessionStorage.setItem(ENDPOINT_COOLDOWN_STORAGE_KEY, JSON.stringify(obj));
+  } catch {
+    // ignore
+  }
+}
+
+export function markSupabaseEndpointUnhealthy(url: string) {
+  const cleanUrl = url.replace(/\/+$/, '');
+  endpointCooldownMap.set(cleanUrl, Date.now() + ENDPOINT_COOLDOWN_MS);
+  persistCooldowns();
+}
+
+export function markSupabaseEndpointHealthy(url: string) {
+  const cleanUrl = url.replace(/\/+$/, '');
+  if (endpointCooldownMap.has(cleanUrl)) {
+    endpointCooldownMap.delete(cleanUrl);
+    persistCooldowns();
+  }
+}
+
+function isPlaceholderValue(val: string): boolean {
+  const v = val.trim();
+  return !v || v.includes('YOUR_SECOND_') || v.includes('MY_') || v === 'undefined';
+}
+
+export function getSupabaseEndpoints(): SupabaseEndpoint[] {
   const cfg = getCloudConfig();
-  return Boolean(cfg.supabaseUrl && cfg.supabaseAnonKey && cfg.supabaseUrl.startsWith('http'));
+  const list: SupabaseEndpoint[] = [];
+
+  if (cfg.supabaseUrl && cfg.supabaseAnonKey && !isPlaceholderValue(cfg.supabaseUrl)) {
+    list.push({
+      url: cfg.supabaseUrl.replace(/\/+$/, ''),
+      anonKey: cfg.supabaseAnonKey.trim(),
+      label: 'primary',
+    });
+  }
+
+  const fallbackUrl = String(import.meta.env.VITE_SUPABASE_FALLBACK_URL || '').trim().replace(/\/+$/, '');
+  const fallbackKey = String(import.meta.env.VITE_SUPABASE_FALLBACK_ANON_KEY || '').trim();
+
+  if (
+    fallbackUrl &&
+    fallbackKey &&
+    fallbackUrl.startsWith('http') &&
+    !isPlaceholderValue(fallbackUrl) &&
+    !isPlaceholderValue(fallbackKey) &&
+    !list.some((ep) => ep.url === fallbackUrl)
+  ) {
+    list.push({
+      url: fallbackUrl,
+      anonKey: fallbackKey,
+      label: 'fallback',
+    });
+  }
+
+  return list;
+}
+
+/**
+ * Returns endpoints ordered with healthy ones first, and cooled-down ones last as a final fallback.
+ */
+export function getOrderedSupabaseEndpoints(): SupabaseEndpoint[] {
+  const endpoints = getSupabaseEndpoints();
+  const now = Date.now();
+  const healthy: SupabaseEndpoint[] = [];
+  const cooling: SupabaseEndpoint[] = [];
+
+  for (const ep of endpoints) {
+    const until = endpointCooldownMap.get(ep.url) || 0;
+    if (until > now) {
+      cooling.push(ep);
+    } else {
+      healthy.push(ep);
+    }
+  }
+
+  return [...healthy, ...cooling];
+}
+
+/**
+ * Returns true when all configured Supabase endpoints have failed recently (e.g. HTTP 402 quota / 5xx / network)
+ * or no Supabase endpoints are configured, signaling immediate fallback to Firebase Firestore.
+ */
+export function areAllSupabaseEndpointsUnhealthy(): boolean {
+  const endpoints = getSupabaseEndpoints();
+  if (endpoints.length === 0) return true;
+  const now = Date.now();
+  return endpoints.every((ep) => (endpointCooldownMap.get(ep.url) || 0) > now);
+}
+
+function shouldFailoverStatus(status: number): boolean {
+  // 402 = exceed_egress_quota / billing restriction, 429 = rate limit, 5xx = server/outage, 401/403 = bad/paused project
+  return status === 402 || status === 429 || status === 401 || status === 403 || status >= 500;
+}
+
+/**
+ * Performs a Supabase REST request with automatic Primary <-> Fallback failover.
+ * If one Supabase project hits quota (HTTP 402), errors out (5xx), or is unreachable,
+ * it instantly retries on the second Supabase project and remembers the healthy one.
+ */
+export async function supabaseFetchWithFailover(
+  pathAndQuery: string,
+  options?: {
+    method?: string;
+    body?: BodyInit | null;
+    extraHeaders?: Record<string, string>;
+  }
+): Promise<{ res: Response; endpoint: SupabaseEndpoint } | null> {
+  const endpoints = getOrderedSupabaseEndpoints();
+  if (endpoints.length === 0) return null;
+
+  const normalizedPath = pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`;
+  let lastResult: { res: Response; endpoint: SupabaseEndpoint } | null = null;
+
+  for (let i = 0; i < endpoints.length; i++) {
+    const ep = endpoints[i];
+    try {
+      const res = await fetch(`${ep.url}${normalizedPath}`, {
+        method: options?.method || 'GET',
+        headers: {
+          apikey: ep.anonKey,
+          Authorization: `Bearer ${ep.anonKey}`,
+          ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(options?.extraHeaders || {}),
+        },
+        body: options?.body,
+      });
+
+      if (res.ok) {
+        markSupabaseEndpointHealthy(ep.url);
+        return { res, endpoint: ep };
+      }
+
+      lastResult = { res, endpoint: ep };
+
+      if (shouldFailoverStatus(res.status)) {
+        markSupabaseEndpointUnhealthy(ep.url);
+        // Try next available Supabase project immediately
+        continue;
+      }
+
+      // Non-failover 4xx (e.g. 400 bad request) — return without switching
+      return lastResult;
+    } catch (err) {
+      console.warn(`Supabase (${ep.label}) network error, trying fallback if available:`, err);
+      markSupabaseEndpointUnhealthy(ep.url);
+    }
+  }
+
+  return lastResult;
+}
+
+export function isSupabaseConfigured(): boolean {
+  return getSupabaseEndpoints().length > 0;
 }
 
 function getDeletedIds(): string[] {
@@ -648,19 +836,14 @@ export async function fetchEduTubeData(): Promise<{
   const cfg = getCloudConfig();
   const deletedIds = getDeletedIds();
 
-  if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+  if (isSupabaseConfigured()) {
     try {
-      const res = await fetch(
-        `${cfg.supabaseUrl}/rest/v1/edutube_videos?select=*&video_type=in.(long,short,live,channel_profile)&order=created_at.desc&limit=200`,
-        {
-          headers: {
-            apikey: cfg.supabaseAnonKey,
-            Authorization: `Bearer ${cfg.supabaseAnonKey}`,
-          },
-        }
+      const result = await supabaseFetchWithFailover(
+        `/rest/v1/edutube_videos?select=*&video_type=in.(long,short,live,channel_profile)&order=created_at.desc&limit=120`
       );
+      const res = result?.res;
 
-      if (res.ok) {
+      if (res && res.ok) {
         const rows = await res.json();
         if (Array.isArray(rows)) {
           const dbChannels: EduTubeChannel[] = [];
@@ -812,14 +995,11 @@ export async function saveEduTubeChannel(channelInput: {
   );
   saveLocalVideos(nextVideos);
 
-  const cfg = getCloudConfig();
-  if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+  if (isSupabaseConfigured()) {
     try {
-      await fetch(`${cfg.supabaseUrl}/rest/v1/edutube_videos`, {
+      await supabaseFetchWithFailover('/rest/v1/edutube_videos', {
         method: 'POST',
-        headers: {
-          apikey: cfg.supabaseAnonKey,
-          Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+        extraHeaders: {
           'Content-Type': 'application/json',
           Prefer: 'resolution=merge-duplicates,return=representation',
         },
@@ -856,14 +1036,11 @@ export async function toggleSubscribeEduTubeChannel(
   ];
   saveLocalChannels(nextChannels);
 
-  const cfg = getCloudConfig();
-  if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+  if (isSupabaseConfigured()) {
     try {
-      await fetch(`${cfg.supabaseUrl}/rest/v1/edutube_videos`, {
+      await supabaseFetchWithFailover('/rest/v1/edutube_videos', {
         method: 'POST',
-        headers: {
-          apikey: cfg.supabaseAnonKey,
-          Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+        extraHeaders: {
           'Content-Type': 'application/json',
           Prefer: 'resolution=merge-duplicates,return=representation',
         },
@@ -1061,19 +1238,19 @@ export async function inspectVideoFile(
   });
 }
 
-function uploadSingleBlobToSupabase(
-  cfg: EduTubeCloudConfig,
+function uploadBlobToSingleEndpoint(
+  endpoint: SupabaseEndpoint,
   blob: Blob,
   objectPath: string,
   contentType: string,
   onProgress?: (loadedBytes: number) => void
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const uploadUrl = `${cfg.supabaseUrl}/storage/v1/object/edutube-media/${objectPath}`;
+    const uploadUrl = `${endpoint.url}/storage/v1/object/edutube-media/${objectPath}`;
     const xhr = new XMLHttpRequest();
     xhr.open('POST', uploadUrl, true);
-    xhr.setRequestHeader('apikey', cfg.supabaseAnonKey);
-    xhr.setRequestHeader('Authorization', `Bearer ${cfg.supabaseAnonKey}`);
+    xhr.setRequestHeader('apikey', endpoint.anonKey);
+    xhr.setRequestHeader('Authorization', `Bearer ${endpoint.anonKey}`);
     xhr.setRequestHeader('Content-Type', contentType || 'application/octet-stream');
 
     xhr.upload.onprogress = (event) => {
@@ -1084,20 +1261,65 @@ function uploadSingleBlobToSupabase(
 
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        const publicUrl = `${cfg.supabaseUrl}/storage/v1/object/public/edutube-media/${objectPath}`;
+        markSupabaseEndpointHealthy(endpoint.url);
+        const publicUrl = `${endpoint.url}/storage/v1/object/public/edutube-media/${objectPath}`;
         resolve(publicUrl);
       } else {
+        if (shouldFailoverStatus(xhr.status)) {
+          markSupabaseEndpointUnhealthy(endpoint.url);
+        }
         reject(new Error(`Cloud upload failed (HTTP ${xhr.status}): ${xhr.responseText}`));
       }
     };
 
-    xhr.onerror = () => reject(new Error('Network error while uploading to Supabase Storage'));
+    xhr.onerror = () => {
+      markSupabaseEndpointUnhealthy(endpoint.url);
+      reject(new Error('Network error while uploading to Supabase Storage'));
+    };
     xhr.send(blob);
   });
 }
 
+async function uploadSingleBlobToSupabase(
+  _cfg: EduTubeCloudConfig,
+  blob: Blob,
+  objectPath: string,
+  contentType: string,
+  onProgress?: (loadedBytes: number) => void
+): Promise<string> {
+  const endpoints = getOrderedSupabaseEndpoints();
+  if (endpoints.length === 0) {
+    throw new Error('Supabase Cloud is not configured');
+  }
+
+  let lastErr: any = null;
+  for (const endpoint of endpoints) {
+    try {
+      return await uploadBlobToSingleEndpoint(endpoint, blob, objectPath, contentType, onProgress);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('Supabase Storage upload failed on all endpoints');
+}
+
+async function uploadBlobToFirebaseStorageFallback(
+  blob: Blob,
+  objectPath: string,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  if (onProgress) onProgress(30);
+  const storageRef = firebaseStorageRef(storage, `edutube/${objectPath}`);
+  const snapshot = await uploadBytes(storageRef, blob);
+  if (onProgress) onProgress(95);
+  const downloadUrl = await getDownloadURL(snapshot.ref);
+  if (onProgress) onProgress(100);
+  return downloadUrl;
+}
+
 /**
- * Uploads a video, thumbnail, or channel image to Supabase Storage (`edutube-media` public bucket).
+ * Uploads a video, thumbnail, or channel image to Supabase Storage (`edutube-media` public bucket),
+ * with automatic fallback to the existing Firebase Storage (`community-6fe4e`) if both Supabase accounts fail.
  * Automatically splits large videos (> 40 MB) into < 40 MB chunks so Supabase Free Tier's 50 MB
  * single-file limit is NEVER exceeded!
  */
@@ -1110,27 +1332,34 @@ export async function uploadMediaToEduTubeCloud(
   const cfg = getCloudConfig();
   const baseTs = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const cleanName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const objectPath = `${folder}/${baseTs}_${cleanName}`;
 
-  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
-    throw new Error('Supabase Cloud is not configured');
+  if (!isSupabaseConfigured()) {
+    const fbUrl = await uploadBlobToFirebaseStorageFallback(fileOrBlob, objectPath, onProgress);
+    return { url: fbUrl, provider: 'external' };
   }
 
-  // Case 1: File <= 40 MB -> Direct single-file upload
+  // Case 1: File <= 40 MB -> Direct single-file upload with Firebase Storage fallback
   if (fileOrBlob.size <= CHUNK_SIZE_BYTES) {
-    const objectPath = `${folder}/${baseTs}_${cleanName}`;
-    const publicUrl = await uploadSingleBlobToSupabase(
-      cfg,
-      fileOrBlob,
-      objectPath,
-      fileOrBlob.type || (folder === 'videos' ? 'video/mp4' : 'image/jpeg'),
-      (loaded) => {
-        if (onProgress && fileOrBlob.size > 0) {
-          onProgress(Math.min(99, Math.round((loaded / fileOrBlob.size) * 100)));
+    try {
+      const publicUrl = await uploadSingleBlobToSupabase(
+        cfg,
+        fileOrBlob,
+        objectPath,
+        fileOrBlob.type || (folder === 'videos' ? 'video/mp4' : 'image/jpeg'),
+        (loaded) => {
+          if (onProgress && fileOrBlob.size > 0) {
+            onProgress(Math.min(99, Math.round((loaded / fileOrBlob.size) * 100)));
+          }
         }
-      }
-    );
-    if (onProgress) onProgress(100);
-    return { url: publicUrl, provider: 'supabase' };
+      );
+      if (onProgress) onProgress(100);
+      return { url: publicUrl, provider: 'supabase' };
+    } catch (supaErr) {
+      console.warn('Both Supabase Storage endpoints failed, falling back to Firebase Storage:', supaErr);
+      const fbUrl = await uploadBlobToFirebaseStorageFallback(fileOrBlob, objectPath, onProgress);
+      return { url: fbUrl, provider: 'external' };
+    }
   }
 
   // Case 2: Large Video (> 40 MB) -> Automatic Multi-Part Chunked Upload to bypass 50 MB per-object limit
@@ -1257,20 +1486,18 @@ export async function publishEduTubeVideo(
   const current = getLocalVideos();
   saveLocalVideos([newVideo, ...current]);
 
-  const cfg = getCloudConfig();
-  if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+  if (isSupabaseConfigured()) {
     try {
-      const res = await fetch(`${cfg.supabaseUrl}/rest/v1/edutube_videos`, {
+      const result = await supabaseFetchWithFailover('/rest/v1/edutube_videos', {
         method: 'POST',
-        headers: {
-          apikey: cfg.supabaseAnonKey,
-          Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+        extraHeaders: {
           'Content-Type': 'application/json',
           Prefer: 'resolution=merge-duplicates,return=representation',
         },
         body: JSON.stringify(videoToDbRow(newVideo)),
       });
-      if (res.ok) {
+      const res = result?.res;
+      if (res && res.ok) {
         const created = await res.json();
         if (Array.isArray(created) && created[0]) {
           const saved = normalizeVideoRow(created[0]);
@@ -1294,11 +1521,9 @@ export async function publishEduTubeVideo(
             isRead: false,
             createdAtMs: Date.now(),
           };
-          fetch(`${cfg.supabaseUrl}/rest/v1/edutube_videos`, {
+          supabaseFetchWithFailover('/rest/v1/edutube_videos', {
             method: 'POST',
-            headers: {
-              apikey: cfg.supabaseAnonKey,
-              Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+            extraHeaders: {
               'Content-Type': 'application/json',
               Prefer: 'resolution=merge-duplicates,return=minimal',
             },
@@ -1360,16 +1585,13 @@ export async function updateEduTubeVideoRecord(
   const updated = current.map((v) => (v.id === videoId ? { ...v, ...patch } : v));
   saveLocalVideos(updated);
 
-  const cfg = getCloudConfig();
-  if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+  if (isSupabaseConfigured()) {
     try {
       if (target && videoId.startsWith('seed-')) {
         const mergedVideo = { ...target, ...patch };
-        await fetch(`${cfg.supabaseUrl}/rest/v1/edutube_videos`, {
+        await supabaseFetchWithFailover('/rest/v1/edutube_videos', {
           method: 'POST',
-          headers: {
-            apikey: cfg.supabaseAnonKey,
-            Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+          extraHeaders: {
             'Content-Type': 'application/json',
             Prefer: 'resolution=merge-duplicates',
           },
@@ -1378,11 +1600,9 @@ export async function updateEduTubeVideoRecord(
         return;
       }
 
-      await fetch(`${cfg.supabaseUrl}/rest/v1/edutube_videos?id=eq.${encodeURIComponent(videoId)}`, {
+      await supabaseFetchWithFailover(`/rest/v1/edutube_videos?id=eq.${encodeURIComponent(videoId)}`, {
         method: 'PATCH',
-        headers: {
-          apikey: cfg.supabaseAnonKey,
-          Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+        extraHeaders: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(patch),
@@ -1397,19 +1617,13 @@ export async function updateEduTubeVideoRecord(
  * Polls a single video row from Supabase for Real-Time Live Chat & Live Viewer/Likes updates (0 Firebase Reads)
  */
 export async function fetchSingleEduTubeVideo(videoId: string): Promise<EduTubeVideo | null> {
-  const cfg = getCloudConfig();
-  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return null;
+  if (!isSupabaseConfigured()) return null;
   try {
-    const res = await fetch(
-      `${cfg.supabaseUrl}/rest/v1/edutube_videos?select=*&id=eq.${encodeURIComponent(videoId)}&limit=1`,
-      {
-        headers: {
-          apikey: cfg.supabaseAnonKey,
-          Authorization: `Bearer ${cfg.supabaseAnonKey}`,
-        },
-      }
+    const result = await supabaseFetchWithFailover(
+      `/rest/v1/edutube_videos?select=*&id=eq.${encodeURIComponent(videoId)}&limit=1`
     );
-    if (res.ok) {
+    const res = result?.res;
+    if (res && res.ok) {
       const rows = await res.json();
       if (Array.isArray(rows) && rows[0]) {
         return normalizeVideoRow(rows[0]);
@@ -1426,15 +1640,10 @@ export async function deleteEduTubeVideoRecord(videoId: string): Promise<void> {
   const current = getLocalVideos();
   saveLocalVideos(current.filter((v) => v.id !== videoId));
 
-  const cfg = getCloudConfig();
-  if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+  if (isSupabaseConfigured()) {
     try {
-      await fetch(`${cfg.supabaseUrl}/rest/v1/edutube_videos?id=eq.${encodeURIComponent(videoId)}`, {
+      await supabaseFetchWithFailover(`/rest/v1/edutube_videos?id=eq.${encodeURIComponent(videoId)}`, {
         method: 'DELETE',
-        headers: {
-          apikey: cfg.supabaseAnonKey,
-          Authorization: `Bearer ${cfg.supabaseAnonKey}`,
-        },
       });
     } catch (err) {
       console.warn('Supabase delete failed:', err);

@@ -1,4 +1,18 @@
-import { DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY, getCloudConfig } from './edutube';
+import { supabaseFetchWithFailover, areAllSupabaseEndpointsUnhealthy } from './edutube';
+import { db } from '../firebase';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+} from 'firebase/firestore';
 
 export type HubRecordType =
   | 'study_session'
@@ -8,7 +22,8 @@ export type HubRecordType =
   | 'post_comment'
   | 'hub_notification'
   | 'user_profile'
-  | 'admin_status';
+  | 'admin_status'
+  | 'chai_support';
 
 const HUB_EVENT_NAME = 'jee-supabase-hub-sync';
 const READ_NOTIFS_STORAGE_KEY = 'jee_hub_read_notif_ids_v1';
@@ -48,22 +63,7 @@ function sanitizePhotoUrl(photo?: string | null): string {
   return photo;
 }
 
-function getSupabaseHeaders(extra?: Record<string, string>): Record<string, string> {
-  const cfg = getCloudConfig();
-  const key = cfg.supabaseAnonKey || DEFAULT_SUPABASE_ANON_KEY;
-  return {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
-    'Content-Type': 'application/json',
-    ...(extra || {}),
-  };
-}
-
-function getSupabaseRestUrl(): string {
-  const cfg = getCloudConfig();
-  const baseUrl = (cfg.supabaseUrl || DEFAULT_SUPABASE_URL).replace(/\/+$/, '');
-  return `${baseUrl}/rest/v1/edutube_videos`;
-}
+// Primary <-> Fallback routing is handled centrally by supabaseFetchWithFailover in ./edutube.
 
 function emitHubSync(recordType: HubRecordType, id?: string) {
   try {
@@ -141,14 +141,15 @@ function decodeHubPayload<T = any>(row: any): T | null {
 
 export async function upsertHubRow(row: ReturnType<typeof encodeHubRow>): Promise<boolean> {
   try {
-    const res = await fetch(getSupabaseRestUrl(), {
+    const result = await supabaseFetchWithFailover('/rest/v1/edutube_videos', {
       method: 'POST',
-      headers: getSupabaseHeaders({
+      extraHeaders: {
+        'Content-Type': 'application/json',
         Prefer: 'resolution=merge-duplicates,return=minimal',
-      }),
+      },
       body: JSON.stringify(row),
     });
-    return res.ok;
+    return Boolean(result?.res?.ok);
   } catch (err) {
     console.warn('Supabase upsertHubRow error:', err);
     return false;
@@ -157,11 +158,11 @@ export async function upsertHubRow(row: ReturnType<typeof encodeHubRow>): Promis
 
 export async function deleteHubRow(rowId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${getSupabaseRestUrl()}?id=eq.${encodeURIComponent(rowId)}`, {
-      method: 'DELETE',
-      headers: getSupabaseHeaders(),
-    });
-    return res.ok;
+    const result = await supabaseFetchWithFailover(
+      `/rest/v1/edutube_videos?id=eq.${encodeURIComponent(rowId)}`,
+      { method: 'DELETE' }
+    );
+    return Boolean(result?.res?.ok);
   } catch (err) {
     console.warn('Supabase deleteHubRow error:', err);
     return false;
@@ -169,8 +170,8 @@ export async function deleteHubRow(rowId: string): Promise<boolean> {
 }
 
 /**
- * Deduplicated query helper: if two components request the exact same query simultaneously,
- * they share a single network round-trip.
+ * Deduplicated query helper with automatic Primary <-> Fallback failover:
+ * if two components request the exact same query simultaneously, they share a single network round-trip.
  */
 export async function queryHubRows(queryString: string): Promise<any[]> {
   const existingPromise = inFlightQueries.get(queryString);
@@ -178,10 +179,9 @@ export async function queryHubRows(queryString: string): Promise<any[]> {
 
   const promise = (async () => {
     try {
-      const res = await fetch(`${getSupabaseRestUrl()}?${queryString}`, {
-        headers: getSupabaseHeaders(),
-      });
-      if (!res.ok) return [];
+      const result = await supabaseFetchWithFailover(`/rest/v1/edutube_videos?${queryString}`);
+      const res = result?.res;
+      if (!res || !res.ok) return [];
       const data = await res.json();
       return Array.isArray(data) ? data : [];
     } catch (err) {
@@ -248,6 +248,34 @@ export async function getCachedUserProfile(uid: string): Promise<any | null> {
           }
           return decoded;
         }
+      }
+
+      // 3rd Tier Fallback: Existing Firebase Firestore `users/{uid}` collection (`community-6fe4e`)
+      try {
+        const userSnap = await getDoc(doc(db, 'users', uid));
+        if (userSnap.exists()) {
+          const fbData = userSnap.data();
+          const clean = {
+            uid,
+            fullName: fbData.fullName || fbData.name || 'Student',
+            username: fbData.username || 'student',
+            photoURL: sanitizePhotoUrl(fbData.photoURL || fbData.avatar || ''),
+            role: fbData.role || 'user',
+            targetExam: fbData.targetExam || 'JEE',
+            cheersEnabled: fbData.cheersEnabled !== false,
+            campus: fbData.campus || { totalCoins: 0, totalXP: 0 },
+          };
+          const withTs = { ...clean, _cachedAt: Date.now() };
+          profileMemoryCache.set(uid, withTs);
+          try {
+            localStorage.setItem(`jee_uprofile_${uid}`, JSON.stringify(withTs));
+          } catch {
+            // ignore
+          }
+          return clean;
+        }
+      } catch {
+        // ignore if unauthenticated or offline
       }
 
       // Negative cache for 15 minutes so missing profiles don't trigger repeated network requests
@@ -431,7 +459,7 @@ export async function createSupabaseNotification(data: {
     createdAtMs: Date.now(),
   };
 
-  await upsertHubRow(
+  const supaSaved = await upsertHubRow(
     encodeHubRow({
       id,
       recordType: 'hub_notification',
@@ -445,6 +473,17 @@ export async function createSupabaseNotification(data: {
       payload,
     })
   );
+
+  if (!supaSaved) {
+    try {
+      await setDoc(doc(db, 'notifications', id), {
+        ...payload,
+        createdAt: new Date(payload.createdAtMs),
+      });
+    } catch {
+      // ignore fallback error
+    }
+  }
 
   emitHubSync('hub_notification', id);
 }
@@ -537,6 +576,40 @@ export async function fetchUserSupabaseNotifications(uid: string): Promise<any[]
     });
   }
 
+  // 3rd Tier Fallback: Existing Firebase Firestore `notifications` collection
+  if (results.length === 0 && areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      const fbNotifSnap = await getDocs(
+        query(collection(db, 'notifications'), where('recipientId', '==', uid), limit(25))
+      );
+      fbNotifSnap.forEach((docSnap) => {
+        const p = docSnap.data() as any;
+        const notifId = p.id || docSnap.id;
+        if (clearedIds.includes(notifId)) return;
+        const createdAtMs =
+          typeof p.createdAtMs === 'number'
+            ? p.createdAtMs
+            : p.createdAt?.toMillis
+            ? p.createdAt.toMillis()
+            : Date.now();
+        if (clearedBefore > 0 && createdAtMs <= clearedBefore) return;
+        const isRead = Boolean(p.isRead || readIds.includes(notifId));
+        results.push({
+          ...p,
+          id: notifId,
+          senderAvatar: sanitizePhotoUrl(p.senderAvatar),
+          isRead,
+          createdAt: {
+            toDate: () => new Date(createdAtMs),
+            toMillis: () => createdAtMs,
+          },
+        });
+      });
+    } catch {
+      // ignore if unauthenticated
+    }
+  }
+
   const sorted = results.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
   notifsMemoryCache.set(uid, sorted);
   return sorted;
@@ -584,7 +657,7 @@ export function subscribeSupabaseNotifications(
     if (document.visibilityState === 'visible') {
       load();
     }
-  }, 30000);
+  }, 120000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'hub_notification') {
@@ -661,6 +734,22 @@ export async function getSupabaseStudySession(uid: string): Promise<any | null> 
       return norm;
     }
   }
+
+  // 3rd Tier Fallback: Existing Firebase Firestore `study_sessions/{uid}`
+  try {
+    const fbSnap = await getDoc(doc(db, 'study_sessions', uid));
+    if (fbSnap.exists()) {
+      const norm = normalizeSessionTimestamps({ ...fbSnap.data(), id: uid, uid });
+      if (localMem && (localMem.lastUpdatedMs || 0) > (norm.lastUpdatedMs || 0)) {
+        return localMem;
+      }
+      mySessionMemoryCache.set(uid, norm);
+      return norm;
+    }
+  } catch {
+    // ignore
+  }
+
   return localMem || null;
 }
 
@@ -711,7 +800,7 @@ export async function saveSupabaseStudySession(uid: string, sessionData: any): P
   }
   emitHubSync('study_session', uid);
 
-  await upsertHubRow(
+  const supaSaved = await upsertHubRow(
     encodeHubRow({
       id: `session_${uid}`,
       recordType: 'study_session',
@@ -728,6 +817,15 @@ export async function saveSupabaseStudySession(uid: string, sessionData: any): P
       payload: merged,
     })
   );
+
+  // Sync to Firebase Firestore `study_sessions/{uid}` when Supabase is down
+  if (!supaSaved || areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      await setDoc(doc(db, 'study_sessions', uid), merged, { merge: true });
+    } catch {
+      // ignore
+    }
+  }
 
   emitHubSync('study_session', uid);
   return normalized;
@@ -768,6 +866,26 @@ export async function fetchAllSupabaseStudySessions(todayDate: string): Promise<
       localMem && (localMem.lastUpdatedMs || 0) > (norm.lastUpdatedMs || 0) ? localMem : norm;
     map.set(decoded.uid, latest);
     mySessionMemoryCache.set(decoded.uid, latest);
+  }
+
+  // 3rd Tier Fallback: Existing Firebase Firestore `study_sessions` collection
+  if (map.size === 0 && areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      const fbSnap = await getDocs(query(collection(db, 'study_sessions'), limit(60)));
+      fbSnap.forEach((docSnap) => {
+        const raw = docSnap.data();
+        const uid = raw.uid || docSnap.id;
+        if (!uid) return;
+        const norm = normalizeSessionTimestamps({ ...raw, id: uid, uid });
+        const localMem = mySessionMemoryCache.get(uid);
+        const latest =
+          localMem && (localMem.lastUpdatedMs || 0) > (norm.lastUpdatedMs || 0) ? localMem : norm;
+        map.set(uid, latest);
+        mySessionMemoryCache.set(uid, latest);
+      });
+    } catch {
+      // ignore if unauthenticated
+    }
   }
 
   const allSessions: any[] = [];
@@ -863,7 +981,7 @@ export function subscribeSupabaseStudySessions(
     if (document.visibilityState === 'visible') {
       refresh();
     }
-  }, 15000);
+  }, 60000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'study_session') {
@@ -903,6 +1021,22 @@ export async function fetchSupabaseStudyGroups(uid: string): Promise<any[]> {
     }
   }
 
+  // 3rd Tier Fallback: Existing Firebase Firestore `study_groups` collection
+  if (groupsMap.size === 0 && areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      const fbSnap = await getDocs(
+        query(collection(db, 'study_groups'), where('members', 'array-contains', uid), limit(40))
+      );
+      fbSnap.forEach((docSnap) => {
+        const g = docSnap.data() as any;
+        const code = (g.shortCode || g.id || docSnap.id).toUpperCase();
+        groupsMap.set(code, { ...g, id: docSnap.id, shortCode: code });
+      });
+    } catch {
+      // ignore
+    }
+  }
+
   return Array.from(groupsMap.values());
 }
 
@@ -914,6 +1048,39 @@ export async function getSupabaseStudyGroupByCode(shortCode: string): Promise<an
   if (rows.length > 0) {
     const decoded = decodeHubPayload(rows[0]);
     if (decoded) return decoded;
+  }
+
+  // 3rd Tier Fallback: Existing Firebase Firestore `study_groups`
+  try {
+    const directSnap = await getDoc(doc(db, 'study_groups', code));
+    if (directSnap.exists()) {
+      const g = directSnap.data() as any;
+      return { ...g, id: directSnap.id, shortCode: g.shortCode || code };
+    }
+    const qSnap = await getDocs(
+      query(collection(db, 'study_groups'), where('shortCode', '==', code), limit(1))
+    );
+    if (!qSnap.empty) {
+      const d = qSnap.docs[0];
+      const g = d.data() as any;
+      let msgs = Array.isArray(g.messages) ? g.messages : [];
+      if (msgs.length === 0) {
+        try {
+          const subMsgs = await getDocs(query(collection(db, 'study_groups', d.id, 'messages'), limit(80)));
+          msgs = subMsgs.docs.map((m) => {
+            const md = m.data() as any;
+            const ms = md.createdAtMs || (md.createdAt?.toMillis ? md.createdAt.toMillis() : Date.now());
+            return { ...md, id: m.id, createdAtMs: ms };
+          });
+          msgs.sort((a: any, b: any) => (a.createdAtMs || 0) - (b.createdAtMs || 0));
+        } catch {
+          // ignore
+        }
+      }
+      return { ...g, id: d.id, shortCode: code, messages: msgs };
+    }
+  } catch {
+    // ignore
   }
   return null;
 }
@@ -933,7 +1100,7 @@ export async function saveSupabaseStudyGroup(groupData: any): Promise<any> {
       : [],
   };
 
-  await upsertHubRow(
+  const supaSaved = await upsertHubRow(
     encodeHubRow({
       id: `group_${code}`,
       recordType: 'study_group',
@@ -949,6 +1116,14 @@ export async function saveSupabaseStudyGroup(groupData: any): Promise<any> {
     })
   );
 
+  if (!supaSaved || areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      await setDoc(doc(db, 'study_groups', code), merged, { merge: true });
+    } catch {
+      // ignore
+    }
+  }
+
   emitHubSync('study_group', code);
   return merged;
 }
@@ -959,6 +1134,9 @@ async function getSupabaseStudyGroupByCodeNoFallback(code: string): Promise<any 
   );
   if (rows.length > 0) {
     return decodeHubPayload(rows[0]);
+  }
+  if (areAllSupabaseEndpointsUnhealthy()) {
+    return getSupabaseStudyGroupByCode(code);
   }
   return null;
 }
@@ -1031,7 +1209,7 @@ export function subscribeSupabaseGroupMessages(
     if (document.visibilityState === 'visible') {
       load();
     }
-  }, 8000);
+  }, 35000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'study_group') {
@@ -1074,6 +1252,37 @@ export async function fetchSupabaseNotes(category: string, subject: string): Pro
     });
   }
 
+  // 3rd Tier Fallback: Existing Firebase Firestore `notes_hub` collection
+  if (notesMap.size === 0 && areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      const fbSnap = await getDocs(
+        query(collection(db, 'notes_hub'), where('category', '==', category), limit(100))
+      );
+      fbSnap.forEach((docSnap) => {
+        const d = docSnap.data() as any;
+        if (d.subject && subject && d.subject !== subject) return;
+        const ms =
+          typeof d.createdAtMs === 'number'
+            ? d.createdAtMs
+            : d.createdAt?.toMillis
+            ? d.createdAt.toMillis()
+            : Date.now();
+        notesMap.set(docSnap.id, {
+          ...d,
+          id: docSnap.id,
+          views: Number(d.views ?? 0),
+          downloads: Number(d.downloads ?? 0),
+          createdAt: {
+            toMillis: () => ms,
+            toDate: () => new Date(ms),
+          },
+        });
+      });
+    } catch {
+      // ignore
+    }
+  }
+
   const sorted = Array.from(notesMap.values()).sort(
     (a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)
   );
@@ -1105,7 +1314,7 @@ export async function createSupabaseNote(params: {
     views: 1,
   };
 
-  await upsertHubRow(
+  const supaSaved = await upsertHubRow(
     encodeHubRow({
       id,
       recordType: 'notes_hub',
@@ -1121,6 +1330,17 @@ export async function createSupabaseNote(params: {
       payload,
     })
   );
+
+  if (!supaSaved || areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      await setDoc(doc(db, 'notes_hub', id), {
+        ...payload,
+        createdAt: new Date(nowMs),
+      });
+    } catch {
+      // ignore
+    }
+  }
 
   sendSupabaseGlobalNotification(
     params.uploadedBy.uid,
@@ -1145,11 +1365,16 @@ export async function incrementSupabaseNoteViews(note: any): Promise<void> {
   const rowId = String(note.id).startsWith('note_') ? note.id : `note_${note.id}`;
   const nextViews = (Number(note.views) || 0) + 1;
   try {
-    await fetch(`${getSupabaseRestUrl()}?id=eq.${encodeURIComponent(rowId)}`, {
-      method: 'PATCH',
-      headers: getSupabaseHeaders(),
-      body: JSON.stringify({ views: nextViews }),
-    });
+    const res = await supabaseFetchWithFailover(
+      `/rest/v1/edutube_videos?id=eq.${encodeURIComponent(rowId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ views: nextViews }),
+      }
+    );
+    if (!res?.res?.ok) {
+      await updateDoc(doc(db, 'notes_hub', String(note.id)), { views: nextViews }).catch(() => {});
+    }
   } catch {
     // ignore
   }
@@ -1157,7 +1382,10 @@ export async function incrementSupabaseNoteViews(note: any): Promise<void> {
 
 export async function deleteSupabaseNote(noteId: string): Promise<void> {
   const rowId = String(noteId).startsWith('note_') ? noteId : `note_${noteId}`;
-  await deleteHubRow(rowId);
+  const deleted = await deleteHubRow(rowId);
+  if (!deleted || areAllSupabaseEndpointsUnhealthy()) {
+    await deleteDoc(doc(db, 'notes_hub', String(noteId))).catch(() => {});
+  }
   emitHubSync('notes_hub', rowId);
 }
 
@@ -1235,12 +1463,12 @@ export function getInstantCommunityPosts(): any[] {
 }
 
 export async function fetchSupabaseCommunityPosts(forceNetwork = false): Promise<any[]> {
-  if (!forceNetwork && postsMemoryCache && Date.now() - postsLastFetchedAt < 8000) {
+  if (!forceNetwork && postsMemoryCache && Date.now() - postsLastFetchedAt < 45000) {
     return postsMemoryCache;
   }
 
   const rows = await queryHubRows(
-    `select=id,created_at,comments&video_type=eq.community_post&order=created_at.desc&limit=45`
+    `select=id,created_at,comments&video_type=eq.community_post&order=created_at.desc&limit=30`
   );
 
   const postsMap = new Map<string, any>();
@@ -1256,6 +1484,50 @@ export async function fetchSupabaseCommunityPosts(forceNetwork = false): Promise
         id: rawId,
       })
     );
+  }
+
+  // 3rd Tier Fallback: Existing Firebase Firestore `posts` collection (`community-6fe4e`)
+  if (postsMap.size === 0 && areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      const fbSnap = await getDocs(
+        query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(35))
+      );
+      const rawDocs: Array<{ id: string; data: any }> = [];
+      fbSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        if (d.isDeleted) return;
+        rawDocs.push({ id: docSnap.id, data: d });
+      });
+
+      // Enrich missing author profiles from cached/Firestore `users/{authorId}`
+      await Promise.all(
+        rawDocs.map(async ({ id, data }) => {
+          let authorName = data.authorName;
+          let authorUsername = data.authorUsername;
+          let authorPhoto = data.authorPhoto;
+          if ((!authorName || !authorUsername) && data.authorId) {
+            const prof = await getCachedUserProfile(data.authorId);
+            if (prof) {
+              authorName = authorName || prof.fullName || prof.username || 'Student';
+              authorUsername = authorUsername || prof.username || 'student';
+              authorPhoto = authorPhoto || prof.photoURL || '';
+            }
+          }
+          postsMap.set(
+            id,
+            hydratePostTimestamps({
+              ...data,
+              id,
+              authorName: authorName || 'Student',
+              authorUsername: authorUsername || 'student',
+              authorPhoto: authorPhoto || '',
+            })
+          );
+        })
+      );
+    } catch (fbErr) {
+      console.warn('Firestore posts fallback query skipped or requires login:', fbErr);
+    }
   }
 
   const sorted = sortCommunityPosts(Array.from(postsMap.values()));
@@ -1313,7 +1585,7 @@ export async function saveSupabaseCommunityPost(
   saveFastPostsCache(sortCommunityPosts([hydrated, ...withoutThis]));
   emitHubSync('community_post', rawId);
 
-  await upsertHubRow(
+  const supaSaved = await upsertHubRow(
     encodeHubRow({
       id: rowId,
       recordType: 'community_post',
@@ -1332,6 +1604,22 @@ export async function saveSupabaseCommunityPost(
       created_at: new Date(createdAtMs).toISOString(),
     })
   );
+
+  // 3rd Tier Fallback: Write to existing Firebase Firestore `posts/{rawId}` when Supabase is down
+  if (!supaSaved || areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      await setDoc(
+        doc(db, 'posts', rawId),
+        {
+          ...cleanPost,
+          createdAt: new Date(createdAtMs),
+        },
+        { merge: true }
+      );
+    } catch (fbErr) {
+      console.warn('Firestore post fallback save error:', fbErr);
+    }
+  }
 
   if (sendNotificationToAll) {
     sendSupabaseGlobalNotification(
@@ -1372,7 +1660,10 @@ export async function deleteSupabaseCommunityPost(postId: string): Promise<void>
   const currentList = getInstantCommunityPosts();
   saveFastPostsCache(currentList.filter((p) => p.id !== rawId));
   emitHubSync('community_post', rawId);
-  await deleteHubRow(`post_${rawId}`);
+  const supaDeleted = await deleteHubRow(`post_${rawId}`);
+  if (!supaDeleted || areAllSupabaseEndpointsUnhealthy()) {
+    await deleteDoc(doc(db, 'posts', rawId)).catch(() => {});
+  }
 }
 
 export function subscribeSupabaseCommunityPosts(onUpdate: (posts: any[]) => void): () => void {
@@ -1391,12 +1682,12 @@ export function subscribeSupabaseCommunityPosts(onUpdate: (posts: any[]) => void
     onUpdate(list);
   };
 
-  load(true);
+  load(false);
   const interval = setInterval(() => {
     if (document.visibilityState === 'visible') {
       load(true);
     }
-  }, 20000);
+  }, 120000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'community_post') {
@@ -1482,6 +1773,56 @@ export async function fetchSupabasePostComments(postId: string): Promise<any[]> 
     commentsMap.set(hydrated.id, hydrated);
   }
 
+  // 3rd Tier Fallback: Existing Firebase Firestore `comments` collection (`community-6fe4e`)
+  if (commentsMap.size === 0 && areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      const fbSnap = await getDocs(
+        query(collection(db, 'comments'), where('postId', '==', rawPostId), limit(120))
+      );
+      const rawComments: Array<{ id: string; data: any }> = [];
+      fbSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        if (d.isDeleted) return;
+        rawComments.push({ id: docSnap.id, data: d });
+      });
+
+      await Promise.all(
+        rawComments.map(async ({ id, data }) => {
+          let authorName = data.authorName;
+          let authorUsername = data.authorUsername;
+          let authorPhoto = data.authorPhoto;
+          if ((!authorName || !authorUsername) && data.authorId) {
+            const prof = await getCachedUserProfile(data.authorId);
+            if (prof) {
+              authorName = authorName || prof.fullName || prof.username || 'Student';
+              authorUsername = authorUsername || prof.username || 'student';
+              authorPhoto = authorPhoto || prof.photoURL || '';
+            }
+          }
+          const ms =
+            typeof data.createdAtMs === 'number'
+              ? data.createdAtMs
+              : data.createdAt?.toMillis
+              ? data.createdAt.toMillis()
+              : Date.now();
+          const hydrated = hydrateCommentItem(
+            {
+              ...data,
+              id,
+              authorName: authorName || 'Student',
+              authorUsername: authorUsername || 'student',
+              authorPhoto: authorPhoto || '',
+            },
+            ms
+          );
+          commentsMap.set(hydrated.id, hydrated);
+        })
+      );
+    } catch {
+      // ignore if unauthenticated
+    }
+  }
+
   const list = Array.from(commentsMap.values());
   saveInstantPostComments(rawPostId, list);
   return list;
@@ -1516,7 +1857,7 @@ export async function saveSupabasePostComment(commentData: any): Promise<any> {
   saveInstantPostComments(rawPostId, nextList);
   emitHubSync('post_comment', rawPostId);
 
-  await upsertHubRow(
+  const supaSaved = await upsertHubRow(
     encodeHubRow({
       id: `pcomment_${rawId}`,
       recordType: 'post_comment',
@@ -1534,6 +1875,21 @@ export async function saveSupabasePostComment(commentData: any): Promise<any> {
     })
   );
 
+  if (!supaSaved || areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      await setDoc(
+        doc(db, 'comments', rawId),
+        {
+          ...clean,
+          createdAt: new Date(createdAtMs),
+        },
+        { merge: true }
+      );
+    } catch {
+      // ignore
+    }
+  }
+
   return hydrated;
 }
 
@@ -1548,7 +1904,10 @@ export async function deleteSupabasePostComment(commentId: string, postId?: stri
     );
     emitHubSync('post_comment', rawPostId);
   }
-  await deleteHubRow(`pcomment_${rawId}`);
+  const supaDeleted = await deleteHubRow(`pcomment_${rawId}`);
+  if (!supaDeleted || areAllSupabaseEndpointsUnhealthy()) {
+    await deleteDoc(doc(db, 'comments', rawId)).catch(() => {});
+  }
   emitHubSync('post_comment', rawId);
 }
 
@@ -1593,7 +1952,7 @@ export function subscribeSupabasePostComments(
     if (document.visibilityState === 'visible') {
       load();
     }
-  }, 12000);
+  }, 45000);
 
   const handleSync = (e: any) => {
     if (!e?.detail?.recordType || e.detail.recordType === 'post_comment') {
@@ -1713,6 +2072,34 @@ export async function fetchSupabaseAdminStatuses(force = false): Promise<any[]> 
     customStatuses.push(hydrated);
   }
 
+  // 3rd Tier Fallback: Existing Firebase Firestore `admin_statuses` collection
+  if (customStatuses.length === 0 && areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      const fbSnap = await getDocs(query(collection(db, 'admin_statuses'), limit(15)));
+      fbSnap.forEach((docSnap) => {
+        const d = docSnap.data() as any;
+        const ms =
+          typeof d.createdAtMs === 'number'
+            ? d.createdAtMs
+            : d.createdAt?.toMillis
+            ? d.createdAt.toMillis()
+            : Date.now();
+        const hydrated = hydrateStatusItem({
+          ...d,
+          id: docSnap.id,
+          createdAtMs: ms,
+        });
+        if (isRemovedLegacyStatus(hydrated) || hydrated.isDeleted || hydrated.isHidden) {
+          return;
+        }
+        customStatuses.push(hydrated);
+      });
+      customStatuses.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+    } catch {
+      // ignore if unauthenticated
+    }
+  }
+
   saveFastStatusesCache(customStatuses);
   return customStatuses;
 }
@@ -1733,7 +2120,7 @@ export async function saveSupabaseAdminStatus(statusData: any): Promise<any> {
   };
   delete clean.createdAt;
 
-  await upsertHubRow(
+  const supaSaved = await upsertHubRow(
     encodeHubRow({
       id: rowId,
       recordType: 'admin_status',
@@ -1750,6 +2137,21 @@ export async function saveSupabaseAdminStatus(statusData: any): Promise<any> {
     })
   );
 
+  if (!supaSaved || areAllSupabaseEndpointsUnhealthy()) {
+    try {
+      await setDoc(
+        doc(db, 'admin_statuses', rawId),
+        {
+          ...clean,
+          createdAt: new Date(createdAtMs),
+        },
+        { merge: true }
+      );
+    } catch {
+      // ignore
+    }
+  }
+
   await fetchSupabaseAdminStatuses(true);
   emitHubSync('admin_status', rawId);
   return hydrateStatusItem(clean);
@@ -1757,7 +2159,10 @@ export async function saveSupabaseAdminStatus(statusData: any): Promise<any> {
 
 export async function deleteSupabaseAdminStatus(statusId: string): Promise<void> {
   const rawId = String(statusId).replace(/^astatus_/, '');
-  await deleteHubRow(`astatus_${rawId}`);
+  const supaDeleted = await deleteHubRow(`astatus_${rawId}`);
+  if (!supaDeleted || areAllSupabaseEndpointsUnhealthy()) {
+    await deleteDoc(doc(db, 'admin_statuses', rawId)).catch(() => {});
+  }
   const currentList = getInstantAdminStatuses().filter((s) => s.id !== rawId);
   saveFastStatusesCache(currentList);
   emitHubSync('admin_status', rawId);
@@ -1788,7 +2193,7 @@ export async function recordSupabaseStatusInteraction(
   };
   delete cleanPayload.createdAt;
 
-  await upsertHubRow(
+  const supaSaved = await upsertHubRow(
     encodeHubRow({
       id: `astatus_${rawId}`,
       recordType: 'admin_status',
@@ -1803,6 +2208,10 @@ export async function recordSupabaseStatusInteraction(
       payload: cleanPayload,
     })
   );
+
+  if (!supaSaved || areAllSupabaseEndpointsUnhealthy()) {
+    await setDoc(doc(db, 'admin_statuses', rawId), cleanPayload, { merge: true }).catch(() => {});
+  }
 
   return { viewsCount: nextViews, wishesCount: nextWishes };
 }
